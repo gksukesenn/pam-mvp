@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 import inspect
 from pathlib import Path
+import secrets
 import sqlite3
 
 import pytest
@@ -49,6 +50,26 @@ TERMINAL_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-TERMINAL-MARKER"
 TRANSCRIPT_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-SSH-TRANSCRIPT"
 
 
+class StaticKeyProvider:
+    def __init__(self, key: bytes) -> None:
+        self.key = key
+
+    def get_key(self) -> bytes:
+        return self.key
+
+
+def make_repository(
+    database_path: Path,
+    key: bytes | None = None,
+) -> tuple[SQLiteAuditRepository, bytes]:
+    integrity_key = secrets.token_bytes(32) if key is None else key
+    repository = SQLiteAuditRepository(
+        database_path,
+        StaticKeyProvider(integrity_key),
+    )
+    return repository, integrity_key
+
+
 def make_event(**changes: object) -> AuditEvent:
     event = AuditEvent(
         id="event-001",
@@ -84,7 +105,7 @@ def read_rows(database_path: Path) -> list[tuple[object, ...]]:
 
 def test_valid_audit_event_is_appended_with_exact_schema(tmp_path: Path):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
 
     repository.append(make_event())
 
@@ -96,6 +117,7 @@ def test_valid_audit_event_is_appended_with_exact_schema(tmp_path: Path):
             ).fetchall()
         ]
     assert columns == [
+        "sequence_no",
         "id",
         "timestamp",
         "event_type",
@@ -104,6 +126,8 @@ def test_valid_audit_event_is_appended_with_exact_schema(tmp_path: Path):
         "session_id",
         "result",
         "reason_code",
+        "previous_mac",
+        "event_mac",
     ]
     assert read_rows(database_path) == [
         (
@@ -121,7 +145,7 @@ def test_valid_audit_event_is_appended_with_exact_schema(tmp_path: Path):
 
 def test_timestamp_is_normalized_to_deterministic_utc_text(tmp_path: Path):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     local_timestamp = datetime(
         2026,
         9,
@@ -142,7 +166,7 @@ def test_timestamp_is_normalized_to_deterministic_utc_text(tmp_path: Path):
 
 def test_nullable_fields_are_persisted_as_sql_null(tmp_path: Path):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
 
     repository.append(
         make_event(
@@ -160,7 +184,7 @@ def test_nullable_fields_are_persisted_as_sql_null(tmp_path: Path):
 
 def test_multiple_events_append_without_overwriting(tmp_path: Path):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     first = make_event()
     second = make_event(
         id="event-002",
@@ -182,7 +206,7 @@ def test_duplicate_event_id_is_rejected_and_original_is_unchanged(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     repository.append(make_event())
     original_row = read_rows(database_path)[0]
 
@@ -198,7 +222,7 @@ def test_duplicate_event_id_is_rejected_and_original_is_unchanged(
 def test_repository_contract_and_implementation_are_append_only(
     tmp_path: Path,
 ):
-    repository = SQLiteAuditRepository(tmp_path / "audit.db")
+    repository, _ = make_repository(tmp_path / "audit.db")
     repository_port: AuditRepository = repository
     source = inspect.getsource(SQLiteAuditRepository).upper()
 
@@ -215,7 +239,7 @@ def test_opaque_credential_cannot_be_serialized_or_leaked_in_error(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     credential = BrokerCredential(CREDENTIAL_MARKER)
     event = make_event(result=credential)
 
@@ -234,12 +258,15 @@ def test_invalid_database_path_fails_explicitly(tmp_path: Path):
         AuditStorageError,
         match="audit database could not be initialized",
     ):
-        SQLiteAuditRepository(database_path)
+        SQLiteAuditRepository(
+            database_path,
+            StaticKeyProvider(secrets.token_bytes(32)),
+        )
 
 
 def test_broken_database_operation_fails_cleanly(tmp_path: Path):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     with closing(sqlite3.connect(database_path)) as connection:
         with connection:
             connection.execute("DROP TABLE audit_events")
@@ -321,7 +348,7 @@ def test_access_service_allow_flow_persists_complete_lifecycle(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     service, vault, broker, brokered_session, terminal_io = (
         make_access_service(
             repository,
@@ -342,13 +369,14 @@ def test_access_service_allow_flow_persists_complete_lifecycle(
         "session_active",
         "session_closed",
     ]
+    repository.verify_integrity()
 
 
 def test_access_service_deny_persists_event_without_vault_or_broker(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     service, vault, broker, brokered_session, terminal_io = (
         make_access_service(repository, [])
     )
@@ -362,13 +390,14 @@ def test_access_service_deny_persists_event_without_vault_or_broker(
     assert [row[2] for row in read_rows(database_path)] == [
         "access_denied"
     ]
+    repository.verify_integrity()
 
 
 def test_access_service_broker_failure_persists_session_failed(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     service, _, _, brokered_session, terminal_io = make_access_service(
         repository,
         [make_policy(AccessEffect.ALLOW)],
@@ -385,13 +414,14 @@ def test_access_service_broker_failure_persists_session_failed(
         "session_opening",
         "session_failed",
     ]
+    repository.verify_integrity()
 
 
 def test_access_flow_does_not_persist_secret_or_terminal_markers(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     service, vault, _, _, terminal_io = make_access_service(
         repository,
         [make_policy(AccessEffect.ALLOW)],
@@ -419,7 +449,7 @@ def test_access_service_does_not_swallow_audit_persistence_failure(
     tmp_path: Path,
 ):
     database_path = tmp_path / "audit.db"
-    repository = SQLiteAuditRepository(database_path)
+    repository, _ = make_repository(database_path)
     service, vault, broker, _, terminal_io = make_access_service(
         repository,
         [],
