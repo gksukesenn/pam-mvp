@@ -10,7 +10,7 @@ from src.infrastructure.ssh.errors import (
     SshConnectionError,
 )
 from src.infrastructure.ssh.host_key import verify_pinned_host_key
-from src.ports.access_dependencies import BrokerCredential
+from src.ports.session_broker import BrokerCredential
 
 
 class VerifiedSshConnection:

@@ -3,7 +3,7 @@ from datetime import datetime
 from src.domain.audit import AuditEvent
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.target import Target
-from src.ports.access_dependencies import BrokerCredential
+from src.ports.session_broker import BrokerCredential, TerminalIO
 
 
 class FakeVault:
@@ -26,14 +26,59 @@ class FakeVault:
         return self.credential
 
 
+class FakeTerminalIO:
+    def fileno(self) -> int:
+        return 0
+
+    def read_input(self, max_bytes: int) -> bytes:
+        return b""
+
+    def write_output(self, data: bytes) -> None:
+        pass
+
+
+class FakeBrokeredSession:
+    def __init__(
+        self,
+        call_log: list[str] | None = None,
+        relay_error: Exception | None = None,
+        close_error: Exception | None = None,
+    ) -> None:
+        self.call_log = call_log
+        self.relay_error = relay_error
+        self.close_error = close_error
+        self.relay_calls: list[TerminalIO] = []
+        self.close_calls = 0
+        self._closed = False
+
+    def relay(self, terminal_io: TerminalIO) -> None:
+        if self.call_log is not None:
+            self.call_log.append("brokered_session.relay")
+        self.relay_calls.append(terminal_io)
+        if self.relay_error is not None:
+            raise self.relay_error
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self.call_log is not None:
+            self.call_log.append("brokered_session.close")
+        self.close_calls += 1
+        if self.close_error is not None:
+            raise self.close_error
+
+
 class FakeSessionBroker:
     def __init__(
         self,
-        succeeds: bool,
+        brokered_session: FakeBrokeredSession,
         call_log: list[str] | None = None,
+        open_error: Exception | None = None,
     ) -> None:
-        self.succeeds = succeeds
+        self.brokered_session = brokered_session
         self.call_log = call_log
+        self.open_error = open_error
         self.calls: list[
             tuple[Target, PrivilegedAccount, BrokerCredential]
         ] = []
@@ -43,11 +88,13 @@ class FakeSessionBroker:
         target: Target,
         privileged_account: PrivilegedAccount,
         credential: BrokerCredential,
-    ) -> bool:
+    ) -> FakeBrokeredSession:
         if self.call_log is not None:
             self.call_log.append("session_broker.open_session")
         self.calls.append((target, privileged_account, credential))
-        return self.succeeds
+        if self.open_error is not None:
+            raise self.open_error
+        return self.brokered_session
 
 
 class FakeAuditRepository:

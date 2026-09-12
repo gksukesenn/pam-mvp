@@ -8,6 +8,7 @@ class AuditEventType(StrEnum):
     ACCESS_DENIED = "access_denied"
     SESSION_OPENING = "session_opening"
     SESSION_ACTIVE = "session_active"
+    SESSION_CLOSED = "session_closed"
     SESSION_FAILED = "session_failed"
 
 

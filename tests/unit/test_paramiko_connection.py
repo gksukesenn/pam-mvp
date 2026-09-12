@@ -21,7 +21,7 @@ from src.infrastructure.ssh.paramiko_connection import (
     ParamikoSshConnector,
     VerifiedSshConnection,
 )
-from src.ports.access_dependencies import BrokerCredential
+from src.ports.session_broker import BrokerCredential
 
 
 CREDENTIAL_BYTES = b"temporary-ssh-test-credential"

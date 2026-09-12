@@ -13,12 +13,14 @@ from src.domain.audit import AuditEventType
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.session import SessionStatus
 from src.domain.target import HostKeyFingerprint, Target
-from src.ports.access_dependencies import BrokerCredential
+from src.ports.session_broker import BrokerCredential
 from tests.fakes.access_dependencies import (
     FakeAuditRepository,
+    FakeBrokeredSession,
     FakeIdGenerator,
     FakePrivilegedAccountRepository,
     FakeSessionBroker,
+    FakeTerminalIO,
     FakeTargetRepository,
     FakeVault,
     FixedClock,
@@ -38,6 +40,8 @@ class Harness:
     account_repository: FakePrivilegedAccountRepository
     vault: FakeVault
     broker: FakeSessionBroker
+    brokered_session: FakeBrokeredSession
+    terminal_io: FakeTerminalIO
     audit_repository: FakeAuditRepository
     id_generator: FakeIdGenerator
     call_log: list[str]
@@ -88,7 +92,9 @@ def make_harness(
     targets: list[Target] | None = None,
     accounts: list[PrivilegedAccount] | None = None,
     credential: BrokerCredential | None = INTERNAL_CREDENTIAL,
-    broker_succeeds: bool = True,
+    broker_open_error: Exception | None = None,
+    relay_error: Exception | None = None,
+    close_error: Exception | None = None,
 ) -> Harness:
     call_log: list[str] = []
     policy_repository = FakePolicyRepository(policies, call_log)
@@ -101,7 +107,17 @@ def make_harness(
         call_log,
     )
     vault = FakeVault(credential, call_log)
-    broker = FakeSessionBroker(broker_succeeds, call_log)
+    brokered_session = FakeBrokeredSession(
+        call_log=call_log,
+        relay_error=relay_error,
+        close_error=close_error,
+    )
+    broker = FakeSessionBroker(
+        brokered_session,
+        call_log,
+        open_error=broker_open_error,
+    )
+    terminal_io = FakeTerminalIO()
     audit_repository = FakeAuditRepository(call_log)
     id_generator = FakeIdGenerator()
     service = AccessService(
@@ -121,26 +137,31 @@ def make_harness(
         account_repository=account_repository,
         vault=vault,
         broker=broker,
+        brokered_session=brokered_session,
+        terminal_io=terminal_io,
         audit_repository=audit_repository,
         id_generator=id_generator,
         call_log=call_log,
     )
 
 
-def test_allowed_access_opens_active_session_and_audits_each_step():
+def test_allowed_access_relays_and_closes_session_normally():
     harness = make_harness([make_policy(AccessEffect.ALLOW)])
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.ALLOW
     assert result.session is not None
-    assert result.session.status is SessionStatus.ACTIVE
+    assert result.session.status is SessionStatus.CLOSED
+    assert result.session.close_reason == "relay_completed"
+    assert result.session.ended_at is not None
     assert harness.vault.calls == [make_account().credential_ref]
     assert len(harness.broker.calls) == 1
     assert [event.event_type for event in harness.audit_repository.events] == [
         AuditEventType.ACCESS_ALLOWED,
         AuditEventType.SESSION_OPENING,
         AuditEventType.SESSION_ACTIVE,
+        AuditEventType.SESSION_CLOSED,
     ]
     assert harness.call_log == [
         "policy_repository.find_matching",
@@ -151,13 +172,21 @@ def test_allowed_access_opens_active_session_and_audits_each_step():
         "audit.append:session_opening",
         "session_broker.open_session",
         "audit.append:session_active",
+        "brokered_session.relay",
+        "brokered_session.close",
+        "audit.append:session_closed",
     ]
+    assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.close_calls == 1
+    assert harness.call_log.index("audit.append:session_active") < (
+        harness.call_log.index("brokered_session.relay")
+    )
 
 
 def test_allowed_access_does_not_expose_resolved_credential():
     harness = make_harness([make_policy(AccessEffect.ALLOW)])
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert {field.name for field in fields(AccessResult)} == {
         "decision",
@@ -173,7 +202,7 @@ def test_allowed_access_does_not_expose_resolved_credential():
 def test_explicit_deny_stops_before_vault_broker_and_session_creation():
     harness = make_harness([make_policy(AccessEffect.DENY)])
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "policy-deny"
@@ -182,6 +211,8 @@ def test_explicit_deny_stops_before_vault_broker_and_session_creation():
     assert harness.account_repository.calls == []
     assert harness.vault.calls == []
     assert harness.broker.calls == []
+    assert harness.brokered_session.relay_calls == []
+    assert harness.brokered_session.close_calls == 0
     assert harness.id_generator.calls == 1
     assert len(harness.audit_repository.events) == 1
     event = harness.audit_repository.events[0]
@@ -193,7 +224,7 @@ def test_explicit_deny_stops_before_vault_broker_and_session_creation():
 def test_no_matching_policy_uses_the_same_safe_deny_path():
     harness = make_harness([])
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "no_matching_policy"
@@ -210,7 +241,7 @@ def test_requires_approval_uses_the_same_safe_deny_path():
         [make_policy(AccessEffect.REQUIRES_APPROVAL)]
     )
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "approval_not_supported"
@@ -222,27 +253,71 @@ def test_requires_approval_uses_the_same_safe_deny_path():
     ]
 
 
-def test_broker_failure_marks_session_failed_without_exposing_credential():
+def test_broker_open_failure_marks_session_failed_without_relay():
     harness = make_harness(
         [make_policy(AccessEffect.ALLOW)],
-        broker_succeeds=False,
+        broker_open_error=RuntimeError("controlled broker open failure"),
     )
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
-    assert result.session.close_reason == "broker_failed"
+    assert result.session.close_reason == "broker_open_failed"
     assert result.session.ended_at is not None
     assert [event.event_type for event in harness.audit_repository.events] == [
         AuditEventType.ACCESS_ALLOWED,
         AuditEventType.SESSION_OPENING,
         AuditEventType.SESSION_FAILED,
     ]
+    assert harness.brokered_session.relay_calls == []
+    assert harness.brokered_session.close_calls == 0
     assert INTERNAL_CREDENTIAL_BYTES.decode() not in repr(result)
     assert all(
         INTERNAL_CREDENTIAL_BYTES.decode() not in repr(event)
         for event in harness.audit_repository.events
+    )
+
+
+def test_relay_failure_marks_active_session_failed_and_closes_brokered_session():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        relay_error=RuntimeError("controlled relay failure"),
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.FAILED
+    assert result.session.close_reason == "relay_failed"
+    assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.close_calls == 1
+    assert [event.event_type for event in harness.audit_repository.events] == [
+        AuditEventType.ACCESS_ALLOWED,
+        AuditEventType.SESSION_OPENING,
+        AuditEventType.SESSION_ACTIVE,
+        AuditEventType.SESSION_FAILED,
+    ]
+    assert harness.call_log.index("audit.append:session_active") < (
+        harness.call_log.index("brokered_session.relay")
+    )
+
+
+def test_brokered_session_close_failure_marks_session_failed():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        close_error=RuntimeError("controlled close failure"),
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.FAILED
+    assert result.session.close_reason == "broker_close_failed"
+    assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.close_calls == 1
+    assert harness.audit_repository.events[-1].event_type is (
+        AuditEventType.SESSION_FAILED
     )
 
 
@@ -252,7 +327,7 @@ def test_missing_target_fails_closed_before_vault_or_broker():
         targets=[],
     )
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "target_not_found"
@@ -270,7 +345,7 @@ def test_missing_account_fails_closed_before_vault_or_broker():
         accounts=[],
     )
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "account_not_found"
@@ -285,7 +360,7 @@ def test_missing_credential_fails_closed_before_broker():
         credential=None,
     )
 
-    result = harness.service.handle(make_request())
+    result = harness.service.handle(make_request(), harness.terminal_io)
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "credential_not_found"

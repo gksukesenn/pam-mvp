@@ -7,8 +7,8 @@ from src.infrastructure.vault.errors import (
     DuplicateCredentialError,
     VaultError,
 )
-from src.ports.access_dependencies import BrokerCredential
 from src.ports.security import EncryptedSecret, SecretCipher
+from src.ports.session_broker import BrokerCredential
 
 
 class SQLiteVault:

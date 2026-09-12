@@ -13,7 +13,8 @@ from src.infrastructure.vault.errors import (
     VaultError,
 )
 from src.infrastructure.vault.sqlite_vault import SQLiteVault
-from src.ports.access_dependencies import BrokerCredential, VaultPort
+from src.ports.access_dependencies import VaultPort
+from src.ports.session_broker import BrokerCredential
 
 
 PLAINTEXT_MARKER = b"PAM-PHASE-5B-PLAINTEXT-CREDENTIAL-DO-NOT-PERSIST"

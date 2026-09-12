@@ -9,10 +9,10 @@ from src.ports.access_dependencies import (
     Clock,
     IdGenerator,
     PrivilegedAccountRepository,
-    SessionBroker,
     TargetRepository,
     VaultPort,
 )
+from src.ports.session_broker import SessionBroker, TerminalIO
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,11 @@ class AccessService:
         self._clock = clock
         self._id_generator = id_generator
 
-    def handle(self, request: AccessRequest) -> AccessResult:
+    def handle(
+        self,
+        request: AccessRequest,
+        terminal_io: TerminalIO,
+    ) -> AccessResult:
         decision = self._policy_evaluator.evaluate(request)
         if decision.effect is not AccessEffect.ALLOW:
             return self._deny(request, decision)
@@ -88,12 +92,19 @@ class AccessService:
             result="opening",
         )
 
-        opened = self._session_broker.open_session(
-            target=target,
-            privileged_account=account,
-            credential=credential,
-        )
-        if opened:
+        try:
+            brokered_session = self._session_broker.open_session(
+                target=target,
+                privileged_account=account,
+                credential=credential,
+            )
+        except Exception:
+            self._fail_session(request, session, "broker_open_failed")
+            return AccessResult(decision=decision, session=session)
+
+        relay_failure = False
+        close_succeeded = False
+        try:
             session.mark_active()
             self._append_event(
                 request=request,
@@ -101,20 +112,53 @@ class AccessService:
                 session_id=session.id,
                 result="active",
             )
+            try:
+                brokered_session.relay(terminal_io)
+            except Exception:
+                relay_failure = True
+        finally:
+            try:
+                brokered_session.close()
+                close_succeeded = True
+            except Exception:
+                pass
+
+        if relay_failure:
+            self._fail_session(request, session, "relay_failed")
+        elif not close_succeeded:
+            self._fail_session(request, session, "broker_close_failed")
         else:
-            session.mark_failed(
+            session.mark_closed(
                 ended_at=self._clock.now(),
-                reason="broker_failed",
+                reason="relay_completed",
             )
             self._append_event(
                 request=request,
-                event_type=AuditEventType.SESSION_FAILED,
+                event_type=AuditEventType.SESSION_CLOSED,
                 session_id=session.id,
-                result="failed",
-                reason_code="broker_failed",
+                result="closed",
+                reason_code="relay_completed",
             )
 
         return AccessResult(decision=decision, session=session)
+
+    def _fail_session(
+        self,
+        request: AccessRequest,
+        session: Session,
+        reason: str,
+    ) -> None:
+        session.mark_failed(
+            ended_at=self._clock.now(),
+            reason=reason,
+        )
+        self._append_event(
+            request=request,
+            event_type=AuditEventType.SESSION_FAILED,
+            session_id=session.id,
+            result="failed",
+            reason_code=reason,
+        )
 
     def _deny_with_reason(
         self,

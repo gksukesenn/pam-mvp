@@ -44,10 +44,18 @@ class Session:
         self.status = SessionStatus.ACTIVE
 
     def mark_failed(self, ended_at: datetime, reason: str) -> None:
-        if self.status is not SessionStatus.OPENING:
-            raise ValueError("only an opening session can fail")
+        if self.status not in {SessionStatus.OPENING, SessionStatus.ACTIVE}:
+            raise ValueError("only an opening or active session can fail")
         self._require_aware(ended_at, "ended_at")
         self.status = SessionStatus.FAILED
+        self.ended_at = ended_at
+        self.close_reason = reason
+
+    def mark_closed(self, ended_at: datetime, reason: str) -> None:
+        if self.status is not SessionStatus.ACTIVE:
+            raise ValueError("only an active session can close")
+        self._require_aware(ended_at, "ended_at")
+        self.status = SessionStatus.CLOSED
         self.ended_at = ended_at
         self.close_reason = reason
 

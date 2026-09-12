@@ -69,3 +69,44 @@ def test_opening_session_can_fail():
     assert session.status is SessionStatus.FAILED
     assert session.ended_at is ended_at
     assert session.close_reason == "broker_failed"
+
+
+def test_active_session_can_close():
+    session = make_session()
+    session.mark_active()
+    ended_at = datetime(2026, 9, 12, 10, 5, tzinfo=UTC)
+
+    session.mark_closed(ended_at=ended_at, reason="relay_completed")
+
+    assert session.status is SessionStatus.CLOSED
+    assert session.ended_at is ended_at
+    assert session.close_reason == "relay_completed"
+
+
+def test_active_session_can_fail():
+    session = make_session()
+    session.mark_active()
+
+    session.mark_failed(
+        ended_at=datetime(2026, 9, 12, 10, 5, tzinfo=UTC),
+        reason="relay_failed",
+    )
+
+    assert session.status is SessionStatus.FAILED
+    assert session.close_reason == "relay_failed"
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [SessionStatus.CLOSED, SessionStatus.FAILED],
+)
+def test_terminal_session_cannot_become_active(
+    terminal_status: SessionStatus,
+):
+    session = make_session(status=terminal_status)
+
+    with pytest.raises(
+        ValueError,
+        match="only an opening session can become active",
+    ):
+        session.mark_active()

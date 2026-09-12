@@ -1,16 +1,8 @@
 import select
-from typing import Protocol
 
 from src.infrastructure.ssh.errors import SshChannelError
 from src.infrastructure.ssh.interactive_channel import InteractiveSshChannel
-
-
-class TerminalIO(Protocol):
-    def fileno(self) -> int: ...
-
-    def read_input(self, max_bytes: int) -> bytes: ...
-
-    def write_output(self, data: bytes) -> None: ...
+from src.ports.session_broker import TerminalIO
 
 
 def relay_terminal(
