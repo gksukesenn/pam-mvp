@@ -1,6 +1,9 @@
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 
+import pytest
+
+import src.application.access_service as access_service_module
 from src.application.access_service import AccessResult, AccessService
 from src.application.policy_evaluator import PolicyEvaluator
 from src.domain.access import (
@@ -9,9 +12,9 @@ from src.domain.access import (
     AccessPolicy,
     AccessRequest,
 )
-from src.domain.audit import AuditEventType
+from src.domain.audit import AuditEvent, AuditEventType
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
-from src.domain.session import SessionStatus
+from src.domain.session import Session, SessionStatus
 from src.domain.target import HostKeyFingerprint, Target
 from src.ports.session_broker import BrokerCredential
 from tests.fakes.access_dependencies import (
@@ -95,6 +98,7 @@ def make_harness(
     broker_open_error: Exception | None = None,
     relay_error: Exception | None = None,
     close_error: Exception | None = None,
+    audit_repository: FakeAuditRepository | None = None,
 ) -> Harness:
     call_log: list[str] = []
     policy_repository = FakePolicyRepository(policies, call_log)
@@ -118,7 +122,10 @@ def make_harness(
         open_error=broker_open_error,
     )
     terminal_io = FakeTerminalIO()
-    audit_repository = FakeAuditRepository(call_log)
+    if audit_repository is None:
+        audit_repository = FakeAuditRepository(call_log)
+    else:
+        audit_repository.call_log = call_log
     id_generator = FakeIdGenerator()
     service = AccessService(
         policy_evaluator=PolicyEvaluator(policy_repository),
@@ -178,6 +185,14 @@ def test_allowed_access_relays_and_closes_session_normally():
     ]
     assert harness.brokered_session.relay_calls == [harness.terminal_io]
     assert harness.brokered_session.close_calls == 1
+    assert sum(
+        event.event_type is AuditEventType.SESSION_CLOSED
+        for event in harness.audit_repository.events
+    ) == 1
+    assert all(
+        event.event_type is not AuditEventType.SESSION_FAILED
+        for event in harness.audit_repository.events
+    )
     assert harness.call_log.index("audit.append:session_active") < (
         harness.call_log.index("brokered_session.relay")
     )
@@ -272,6 +287,10 @@ def test_broker_open_failure_marks_session_failed_without_relay():
     ]
     assert harness.brokered_session.relay_calls == []
     assert harness.brokered_session.close_calls == 0
+    assert sum(
+        event.event_type is AuditEventType.SESSION_FAILED
+        for event in harness.audit_repository.events
+    ) == 1
     assert INTERNAL_CREDENTIAL_BYTES.decode() not in repr(result)
     assert all(
         INTERNAL_CREDENTIAL_BYTES.decode() not in repr(event)
@@ -290,6 +309,7 @@ def test_relay_failure_marks_active_session_failed_and_closes_brokered_session()
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
     assert result.session.close_reason == "relay_failed"
+    assert result.session.ended_at is not None
     assert harness.brokered_session.relay_calls == [harness.terminal_io]
     assert harness.brokered_session.close_calls == 1
     assert [event.event_type for event in harness.audit_repository.events] == [
@@ -300,6 +320,14 @@ def test_relay_failure_marks_active_session_failed_and_closes_brokered_session()
     ]
     assert harness.call_log.index("audit.append:session_active") < (
         harness.call_log.index("brokered_session.relay")
+    )
+    assert sum(
+        event.event_type is AuditEventType.SESSION_FAILED
+        for event in harness.audit_repository.events
+    ) == 1
+    assert all(
+        event.event_type is not AuditEventType.SESSION_CLOSED
+        for event in harness.audit_repository.events
     )
 
 
@@ -314,11 +342,122 @@ def test_brokered_session_close_failure_marks_session_failed():
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
     assert result.session.close_reason == "broker_close_failed"
+    assert result.session.ended_at is not None
     assert harness.brokered_session.relay_calls == [harness.terminal_io]
     assert harness.brokered_session.close_calls == 1
     assert harness.audit_repository.events[-1].event_type is (
         AuditEventType.SESSION_FAILED
     )
+    assert sum(
+        event.event_type is AuditEventType.SESSION_FAILED
+        for event in harness.audit_repository.events
+    ) == 1
+    assert all(
+        event.event_type is not AuditEventType.SESSION_CLOSED
+        for event in harness.audit_repository.events
+    )
+
+
+def test_relay_failure_takes_precedence_when_cleanup_also_fails():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        relay_error=RuntimeError("controlled relay failure"),
+        close_error=RuntimeError("controlled close failure"),
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.FAILED
+    assert result.session.close_reason == "relay_failed"
+    assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.close_calls == 1
+    assert sum(
+        event.event_type is AuditEventType.SESSION_FAILED
+        for event in harness.audit_repository.events
+    ) == 1
+
+
+class ControlledAuditFailure(RuntimeError):
+    pass
+
+
+class FailingAuditRepository(FakeAuditRepository):
+    def __init__(self, fail_on: AuditEventType) -> None:
+        super().__init__()
+        self.fail_on = fail_on
+
+    def append(self, event: AuditEvent) -> None:
+        if event.event_type is self.fail_on:
+            raise ControlledAuditFailure("controlled audit failure")
+        super().append(event)
+
+
+def capture_failed_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[Session]:
+    failed_sessions: list[Session] = []
+    original_mark_failed = Session.mark_failed
+
+    def mark_failed(
+        session: Session,
+        ended_at: datetime,
+        reason: str,
+    ) -> None:
+        original_mark_failed(session, ended_at, reason)
+        failed_sessions.append(session)
+
+    monkeypatch.setattr(
+        access_service_module.Session,
+        "mark_failed",
+        mark_failed,
+    )
+    return failed_sessions
+
+
+def test_opening_audit_failure_marks_session_failed_before_propagating(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    failed_sessions = capture_failed_sessions(monkeypatch)
+    repository = FailingAuditRepository(AuditEventType.SESSION_OPENING)
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        audit_repository=repository,
+    )
+
+    with pytest.raises(ControlledAuditFailure):
+        harness.service.handle(make_request(), harness.terminal_io)
+
+    assert len(failed_sessions) == 1
+    session = failed_sessions[0]
+    assert session.status is SessionStatus.FAILED
+    assert session.ended_at is not None
+    assert session.close_reason == "audit_persistence_failed"
+    assert harness.broker.calls == []
+    assert harness.brokered_session.close_calls == 0
+
+
+def test_active_audit_failure_fails_session_and_preserves_audit_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    failed_sessions = capture_failed_sessions(monkeypatch)
+    repository = FailingAuditRepository(AuditEventType.SESSION_ACTIVE)
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        close_error=RuntimeError("controlled close failure"),
+        audit_repository=repository,
+    )
+
+    with pytest.raises(ControlledAuditFailure):
+        harness.service.handle(make_request(), harness.terminal_io)
+
+    assert len(failed_sessions) == 1
+    session = failed_sessions[0]
+    assert session.status is SessionStatus.FAILED
+    assert session.ended_at is not None
+    assert session.close_reason == "audit_persistence_failed"
+    assert harness.brokered_session.relay_calls == []
+    assert harness.brokered_session.close_calls == 1
 
 
 def test_missing_target_fails_closed_before_vault_or_broker():

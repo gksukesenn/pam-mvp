@@ -78,19 +78,26 @@ class AccessService:
             status=SessionStatus.OPENING,
             started_at=self._clock.now(),
         )
-        self._append_event(
-            request=request,
-            event_type=AuditEventType.ACCESS_ALLOWED,
-            session_id=session.id,
-            result="allowed",
-            reason_code=decision.reason,
-        )
-        self._append_event(
-            request=request,
-            event_type=AuditEventType.SESSION_OPENING,
-            session_id=session.id,
-            result="opening",
-        )
+        try:
+            self._append_event(
+                request=request,
+                event_type=AuditEventType.ACCESS_ALLOWED,
+                session_id=session.id,
+                result="allowed",
+                reason_code=decision.reason,
+            )
+            self._append_event(
+                request=request,
+                event_type=AuditEventType.SESSION_OPENING,
+                session_id=session.id,
+                result="opening",
+            )
+        except Exception:
+            session.mark_failed(
+                ended_at=self._clock.now(),
+                reason="audit_persistence_failed",
+            )
+            raise
 
         try:
             brokered_session = self._session_broker.open_session(
@@ -106,12 +113,19 @@ class AccessService:
         close_succeeded = False
         try:
             session.mark_active()
-            self._append_event(
-                request=request,
-                event_type=AuditEventType.SESSION_ACTIVE,
-                session_id=session.id,
-                result="active",
-            )
+            try:
+                self._append_event(
+                    request=request,
+                    event_type=AuditEventType.SESSION_ACTIVE,
+                    session_id=session.id,
+                    result="active",
+                )
+            except Exception:
+                session.mark_failed(
+                    ended_at=self._clock.now(),
+                    reason="audit_persistence_failed",
+                )
+                raise
             try:
                 brokered_session.relay(terminal_io)
             except Exception:
