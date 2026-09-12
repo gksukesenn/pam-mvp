@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -16,7 +16,7 @@ from src.domain.audit import AuditEvent, AuditEventType
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.session import Session, SessionStatus
 from src.domain.target import HostKeyFingerprint, Target
-from src.ports.session_broker import BrokerCredential
+from src.ports.session_broker import BrokerCredential, RelayOutcome
 from tests.fakes.access_dependencies import (
     FakeAuditRepository,
     FakeBrokeredSession,
@@ -33,6 +33,7 @@ from tests.fakes.policy_repository import FakePolicyRepository
 
 INTERNAL_CREDENTIAL_BYTES = b"vault-internal-password"
 INTERNAL_CREDENTIAL = BrokerCredential(INTERNAL_CREDENTIAL_BYTES)
+MAX_SESSION_DURATION = timedelta(minutes=30)
 
 
 @dataclass
@@ -99,6 +100,8 @@ def make_harness(
     relay_error: Exception | None = None,
     close_error: Exception | None = None,
     audit_repository: FakeAuditRepository | None = None,
+    relay_outcome: RelayOutcome = RelayOutcome.COMPLETED,
+    max_session_duration: timedelta = MAX_SESSION_DURATION,
 ) -> Harness:
     call_log: list[str] = []
     policy_repository = FakePolicyRepository(policies, call_log)
@@ -115,6 +118,7 @@ def make_harness(
         call_log=call_log,
         relay_error=relay_error,
         close_error=close_error,
+        relay_outcome=relay_outcome,
     )
     broker = FakeSessionBroker(
         brokered_session,
@@ -136,6 +140,7 @@ def make_harness(
         audit_repository=audit_repository,
         clock=FixedClock(datetime(2026, 9, 12, 10, 5, tzinfo=UTC)),
         id_generator=id_generator,
+        max_session_duration=max_session_duration,
     )
     return Harness(
         service=service,
@@ -184,6 +189,7 @@ def test_allowed_access_relays_and_closes_session_normally():
         "audit.append:session_closed",
     ]
     assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.max_durations == [MAX_SESSION_DURATION]
     assert harness.brokered_session.close_calls == 1
     assert sum(
         event.event_type is AuditEventType.SESSION_CLOSED
@@ -196,6 +202,115 @@ def test_allowed_access_relays_and_closes_session_normally():
     assert harness.call_log.index("audit.append:session_active") < (
         harness.call_log.index("brokered_session.relay")
     )
+
+
+def test_positive_max_session_duration_is_accepted_and_forwarded():
+    duration = timedelta(seconds=45)
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        max_session_duration=duration,
+    )
+
+    harness.service.handle(make_request(), harness.terminal_io)
+
+    assert harness.brokered_session.max_durations == [duration]
+
+
+@pytest.mark.parametrize(
+    "duration",
+    [timedelta(0), timedelta(microseconds=-1)],
+)
+def test_nonpositive_max_session_duration_is_rejected(
+    duration: timedelta,
+):
+    with pytest.raises(
+        ValueError,
+        match="max_session_duration must be positive",
+    ):
+        make_harness(
+            [make_policy(AccessEffect.ALLOW)],
+            max_session_duration=duration,
+        )
+
+
+def test_max_duration_timeout_closes_session_after_relay(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        relay_outcome=RelayOutcome.MAX_DURATION_EXCEEDED,
+    )
+    original_mark_closed = Session.mark_closed
+
+    def mark_closed(
+        session: Session,
+        ended_at: datetime,
+        reason: str,
+    ) -> None:
+        harness.call_log.append("session.mark_closed")
+        original_mark_closed(session, ended_at, reason)
+
+    monkeypatch.setattr(
+        access_service_module.Session,
+        "mark_closed",
+        mark_closed,
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.CLOSED
+    assert result.session.close_reason == "max_duration_exceeded"
+    assert result.session.ended_at is not None
+    assert result.session.ended_at.tzinfo is not None
+    assert result.session.ended_at.utcoffset() is not None
+    assert harness.brokered_session.max_durations == [MAX_SESSION_DURATION]
+    assert harness.brokered_session.close_calls == 1
+    assert harness.call_log.index("audit.append:session_active") < (
+        harness.call_log.index("brokered_session.relay")
+    )
+    assert harness.call_log.index("brokered_session.relay") < (
+        harness.call_log.index("session.mark_closed")
+    )
+    assert harness.call_log.index("brokered_session.close") < (
+        harness.call_log.index("session.mark_closed")
+    )
+    terminal_events = [
+        event
+        for event in harness.audit_repository.events
+        if event.event_type
+        in {AuditEventType.SESSION_CLOSED, AuditEventType.SESSION_FAILED}
+    ]
+    assert len(terminal_events) == 1
+    assert terminal_events[0].event_type is AuditEventType.SESSION_CLOSED
+    assert terminal_events[0].result == "closed"
+    assert terminal_events[0].reason_code == "max_duration_exceeded"
+    assert INTERNAL_CREDENTIAL_BYTES.decode() not in repr(result)
+    assert all(
+        INTERNAL_CREDENTIAL_BYTES.decode() not in repr(event)
+        for event in harness.audit_repository.events
+    )
+
+
+def test_timeout_with_cleanup_failure_uses_broker_close_failure_semantics():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        relay_outcome=RelayOutcome.MAX_DURATION_EXCEEDED,
+        close_error=RuntimeError("controlled close failure"),
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.FAILED
+    assert result.session.close_reason == "broker_close_failed"
+    assert harness.brokered_session.close_calls == 1
+    assert [
+        event.event_type
+        for event in harness.audit_repository.events
+        if event.event_type
+        in {AuditEventType.SESSION_CLOSED, AuditEventType.SESSION_FAILED}
+    ] == [AuditEventType.SESSION_FAILED]
 
 
 def test_allowed_access_does_not_expose_resolved_credential():

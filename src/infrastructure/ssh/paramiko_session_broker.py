@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from src.domain.privileged_account import PrivilegedAccount
 from src.domain.target import Target
 from src.infrastructure.ssh.errors import SshChannelError
@@ -7,7 +9,11 @@ from src.infrastructure.ssh.paramiko_connection import (
     VerifiedSshConnection,
 )
 from src.infrastructure.ssh.terminal_relay import relay_terminal
-from src.ports.session_broker import BrokerCredential, TerminalIO
+from src.ports.session_broker import (
+    BrokerCredential,
+    RelayOutcome,
+    TerminalIO,
+)
 
 
 class ParamikoBrokeredSession:
@@ -22,10 +28,18 @@ class ParamikoBrokeredSession:
         self._channel = channel
         self._closed = False
 
-    def relay(self, terminal_io: TerminalIO) -> None:
+    def relay(
+        self,
+        terminal_io: TerminalIO,
+        max_duration: timedelta,
+    ) -> RelayOutcome:
         if self._closed:
             raise SshChannelError("brokered SSH session is closed")
-        relay_terminal(self._channel, terminal_io)
+        return relay_terminal(
+            self._channel,
+            terminal_io,
+            max_duration=max_duration,
+        )
 
     def close(self) -> None:
         if self._closed:

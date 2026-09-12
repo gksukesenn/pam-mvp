@@ -1,9 +1,13 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.domain.audit import AuditEvent
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.target import Target
-from src.ports.session_broker import BrokerCredential, TerminalIO
+from src.ports.session_broker import (
+    BrokerCredential,
+    RelayOutcome,
+    TerminalIO,
+)
 
 
 class FakeVault:
@@ -43,20 +47,29 @@ class FakeBrokeredSession:
         call_log: list[str] | None = None,
         relay_error: Exception | None = None,
         close_error: Exception | None = None,
+        relay_outcome: RelayOutcome = RelayOutcome.COMPLETED,
     ) -> None:
         self.call_log = call_log
         self.relay_error = relay_error
         self.close_error = close_error
+        self.relay_outcome = relay_outcome
         self.relay_calls: list[TerminalIO] = []
+        self.max_durations: list[timedelta] = []
         self.close_calls = 0
         self._closed = False
 
-    def relay(self, terminal_io: TerminalIO) -> None:
+    def relay(
+        self,
+        terminal_io: TerminalIO,
+        max_duration: timedelta,
+    ) -> RelayOutcome:
         if self.call_log is not None:
             self.call_log.append("brokered_session.relay")
         self.relay_calls.append(terminal_io)
+        self.max_durations.append(max_duration)
         if self.relay_error is not None:
             raise self.relay_error
+        return self.relay_outcome
 
     def close(self) -> None:
         if self._closed:

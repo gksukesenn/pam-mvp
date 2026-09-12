@@ -312,6 +312,7 @@ def make_access_service(
         audit_repository=repository,
         clock=FixedClock(datetime(2026, 9, 12, 10, 5, tzinfo=UTC)),
         id_generator=FakeIdGenerator(),
+        max_session_duration=timedelta(minutes=30),
     )
     return service, vault, broker, brokered_session, terminal_io
 

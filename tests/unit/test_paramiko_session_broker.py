@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 
 import pytest
 
@@ -10,7 +11,7 @@ from src.infrastructure.ssh.paramiko_session_broker import (
     ParamikoBrokeredSession,
     ParamikoSessionBroker,
 )
-from src.ports.session_broker import BrokerCredential
+from src.ports.session_broker import BrokerCredential, RelayOutcome
 from tests.fakes.access_dependencies import FakeTerminalIO
 
 
@@ -102,11 +103,20 @@ def test_open_session_composes_connector_and_channel_without_relaying(
     connector = FakeConnector(connection)
     factory = ChannelFactory(channel)
     install_channel_factory(monkeypatch, factory)
-    relay_calls: list[tuple[object, object]] = []
+    relay_calls: list[tuple[object, object, timedelta]] = []
+
+    def controlled_relay(
+        relay_channel: object,
+        terminal: object,
+        max_duration: timedelta,
+    ) -> RelayOutcome:
+        relay_calls.append((relay_channel, terminal, max_duration))
+        return RelayOutcome.COMPLETED
+
     monkeypatch.setattr(
         broker_module,
         "relay_terminal",
-        lambda channel, terminal: relay_calls.append((channel, terminal)),
+        controlled_relay,
     )
     broker = ParamikoSessionBroker(connector)
 
@@ -122,8 +132,10 @@ def test_open_session_composes_connector_and_channel_without_relaying(
     assert relay_calls == []
 
     terminal_io = FakeTerminalIO()
-    brokered_session.relay(terminal_io)
-    assert relay_calls == [(channel, terminal_io)]
+    max_duration = timedelta(minutes=30)
+    outcome = brokered_session.relay(terminal_io, max_duration)
+    assert outcome is RelayOutcome.COMPLETED
+    assert relay_calls == [(channel, terminal_io, max_duration)]
     brokered_session.close()
 
 

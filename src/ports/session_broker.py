@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from datetime import timedelta
+from enum import StrEnum
 from typing import Protocol
 
 from src.domain.privileged_account import PrivilegedAccount
@@ -28,8 +30,17 @@ class TerminalIO(Protocol):
     def write_output(self, data: bytes) -> None: ...
 
 
+class RelayOutcome(StrEnum):
+    COMPLETED = "completed"
+    MAX_DURATION_EXCEEDED = "max_duration_exceeded"
+
+
 class BrokeredSession(Protocol):
-    def relay(self, terminal_io: TerminalIO) -> None: ...
+    def relay(
+        self,
+        terminal_io: TerminalIO,
+        max_duration: timedelta,
+    ) -> RelayOutcome: ...
 
     def close(self) -> None: ...
 

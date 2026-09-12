@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 
 from src.application.policy_evaluator import PolicyEvaluator
 from src.domain.access import AccessDecision, AccessEffect, AccessRequest
@@ -12,7 +13,7 @@ from src.ports.access_dependencies import (
     TargetRepository,
     VaultPort,
 )
-from src.ports.session_broker import SessionBroker, TerminalIO
+from src.ports.session_broker import RelayOutcome, SessionBroker, TerminalIO
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,12 @@ class AccessResult:
 
 
 class AccessService:
+    """Orchestrate privileged access with a total elapsed-duration cap.
+
+    The configured maximum applies regardless of terminal activity. It is not
+    an idle timeout.
+    """
+
     def __init__(
         self,
         policy_evaluator: PolicyEvaluator,
@@ -32,7 +39,13 @@ class AccessService:
         audit_repository: AuditRepository,
         clock: Clock,
         id_generator: IdGenerator,
+        max_session_duration: timedelta,
     ) -> None:
+        if not isinstance(max_session_duration, timedelta):
+            raise TypeError("max_session_duration must be a timedelta")
+        if max_session_duration <= timedelta(0):
+            raise ValueError("max_session_duration must be positive")
+
         self._policy_evaluator = policy_evaluator
         self._target_repository = target_repository
         self._account_repository = account_repository
@@ -41,6 +54,7 @@ class AccessService:
         self._audit_repository = audit_repository
         self._clock = clock
         self._id_generator = id_generator
+        self._max_session_duration = max_session_duration
 
     def handle(
         self,
@@ -110,6 +124,7 @@ class AccessService:
             return AccessResult(decision=decision, session=session)
 
         relay_failure = False
+        relay_outcome: RelayOutcome | None = None
         close_succeeded = False
         try:
             session.mark_active()
@@ -127,7 +142,12 @@ class AccessService:
                 )
                 raise
             try:
-                brokered_session.relay(terminal_io)
+                relay_outcome = brokered_session.relay(
+                    terminal_io,
+                    max_duration=self._max_session_duration,
+                )
+                if not isinstance(relay_outcome, RelayOutcome):
+                    raise ValueError("unsupported relay outcome")
             except Exception:
                 relay_failure = True
         finally:
@@ -142,16 +162,21 @@ class AccessService:
         elif not close_succeeded:
             self._fail_session(request, session, "broker_close_failed")
         else:
+            close_reason = (
+                "max_duration_exceeded"
+                if relay_outcome is RelayOutcome.MAX_DURATION_EXCEEDED
+                else "relay_completed"
+            )
             session.mark_closed(
                 ended_at=self._clock.now(),
-                reason="relay_completed",
+                reason=close_reason,
             )
             self._append_event(
                 request=request,
                 event_type=AuditEventType.SESSION_CLOSED,
                 session_id=session.id,
                 result="closed",
-                reason_code="relay_completed",
+                reason_code=close_reason,
             )
 
         return AccessResult(decision=decision, session=session)

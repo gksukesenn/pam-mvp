@@ -1,3 +1,5 @@
+from datetime import timedelta
+import inspect
 from pathlib import Path
 import re
 
@@ -8,9 +10,21 @@ from src.infrastructure.ssh.interactive_channel import InteractiveSshChannel
 from src.infrastructure.ssh.paramiko_connection import VerifiedSshConnection
 import src.infrastructure.ssh.terminal_relay as relay_module
 from src.infrastructure.ssh.terminal_relay import relay_terminal
+from src.ports.session_broker import RelayOutcome
 
 
 TERMINAL_CONTENT = b"terminal-test-content\x00\xff"
+MAX_DURATION = timedelta(seconds=10)
+
+
+class FakeMonotonic:
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+        self.calls = 0
+
+    def __call__(self) -> float:
+        self.calls += 1
+        return self.values.pop(0)
 
 
 class FakeSocket:
@@ -126,16 +140,22 @@ def install_select_plan(
     plan: list[str],
     channel: InteractiveSshChannel,
     terminal: FakeTerminalIO,
+    timeouts: list[float] | None = None,
 ) -> None:
     def controlled_select(
         readers: list[object],
         writers: list[object],
         errors: list[object],
+        timeout: float,
     ) -> tuple[list[object], list[object], list[object]]:
         assert readers == [terminal, channel]
         assert writers == []
         assert errors == []
+        if timeouts is not None:
+            timeouts.append(timeout)
         ready = plan.pop(0)
+        if ready == "timeout":
+            return [], [], []
         endpoint = channel if ready == "remote" else terminal
         return [endpoint], [], []
 
@@ -259,9 +279,16 @@ def test_relay_sends_local_input_to_remote_and_stops_on_local_eof(
         channel,
         terminal,
     )
+    monotonic = FakeMonotonic([0, 0, 1, 1, 2])
 
-    relay_terminal(channel, terminal)
+    outcome = relay_terminal(
+        channel,
+        terminal,
+        max_duration=MAX_DURATION,
+        monotonic=monotonic,
+    )
 
+    assert outcome is RelayOutcome.COMPLETED
     assert raw_channel.sent_chunks == [TERMINAL_CONTENT]
     assert terminal.read_sizes == [32 * 1024, 32 * 1024]
     assert raw_channel.close_calls == 1
@@ -281,9 +308,16 @@ def test_relay_writes_remote_bytes_and_stops_on_remote_eof(
         channel,
         terminal,
     )
+    monotonic = FakeMonotonic([0, 0, 1, 1, 2])
 
-    relay_terminal(channel, terminal)
+    outcome = relay_terminal(
+        channel,
+        terminal,
+        max_duration=MAX_DURATION,
+        monotonic=monotonic,
+    )
 
+    assert outcome is RelayOutcome.COMPLETED
     assert terminal.output_chunks == [TERMINAL_CONTENT]
     assert raw_channel.receive_sizes == [32 * 1024, 32 * 1024]
     assert raw_channel.close_calls == 1
@@ -298,14 +332,91 @@ def test_relay_closes_channel_when_io_fails(
     channel = InteractiveSshChannel(raw_channel)
     terminal = FakeTerminalIO([TERMINAL_CONTENT])
     install_select_plan(monkeypatch, ["local"], channel, terminal)
+    monotonic = FakeMonotonic([0, 0, 1])
 
     with pytest.raises(
         SshChannelError,
         match="interactive terminal relay failed",
     ):
-        relay_terminal(channel, terminal)
+        relay_terminal(
+            channel,
+            terminal,
+            max_duration=MAX_DURATION,
+            monotonic=monotonic,
+        )
 
     assert raw_channel.close_calls == 1
+
+
+def test_relay_times_out_without_io_using_remaining_select_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    raw_channel = FakeChannel()
+    channel = InteractiveSshChannel(raw_channel)
+    terminal = FakeTerminalIO()
+    select_timeouts: list[float] = []
+    install_select_plan(
+        monkeypatch,
+        ["timeout"],
+        channel,
+        terminal,
+        select_timeouts,
+    )
+    monotonic = FakeMonotonic([100, 102, 110])
+
+    outcome = relay_terminal(
+        channel,
+        terminal,
+        max_duration=MAX_DURATION,
+        monotonic=monotonic,
+    )
+
+    assert outcome is RelayOutcome.MAX_DURATION_EXCEEDED
+    assert select_timeouts == [8]
+    assert monotonic.calls == 3
+    assert raw_channel.close_calls == 1
+    assert raw_channel.sent_chunks == []
+    assert terminal.output_chunks == []
+
+
+def test_terminal_activity_does_not_reset_maximum_duration(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    raw_channel = FakeChannel()
+    channel = InteractiveSshChannel(raw_channel)
+    terminal = FakeTerminalIO([TERMINAL_CONTENT])
+    select_timeouts: list[float] = []
+    install_select_plan(
+        monkeypatch,
+        ["local"],
+        channel,
+        terminal,
+        select_timeouts,
+    )
+    monotonic = FakeMonotonic([0, 0, 1, 10])
+
+    outcome = relay_terminal(
+        channel,
+        terminal,
+        max_duration=MAX_DURATION,
+        monotonic=monotonic,
+    )
+
+    assert outcome is RelayOutcome.MAX_DURATION_EXCEEDED
+    assert raw_channel.sent_chunks == [TERMINAL_CONTENT]
+    assert select_timeouts == [10]
+    assert raw_channel.close_calls == 1
+
+
+def test_relay_requires_duration_and_uses_no_wall_clock():
+    parameter = inspect.signature(relay_terminal).parameters[
+        "max_duration"
+    ]
+    source = inspect.getsource(relay_module)
+
+    assert parameter.default is inspect.Parameter.empty
+    assert "datetime.now" not in source
+    assert "datetime.utcnow" not in source
 
 
 def test_ssh_pty_source_has_no_content_logging_recording_or_scope_creep():
