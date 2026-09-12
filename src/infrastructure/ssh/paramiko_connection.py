@@ -48,6 +48,11 @@ class VerifiedSshConnection:
     def __repr__(self) -> str:
         return f"VerifiedSshConnection(closed={self._closed})"
 
+    def _open_session_channel(self) -> paramiko.Channel:
+        if self._closed:
+            raise SshConnectionError("verified SSH connection is closed")
+        return self._transport.open_session()
+
 
 class ParamikoSshConnector:
     def __init__(self, connect_timeout: float = 10.0) -> None:

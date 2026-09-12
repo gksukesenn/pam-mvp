@@ -8,3 +8,7 @@ class HostKeyMismatchError(SshConnectionError):
 
 class SshAuthenticationError(SshConnectionError):
     """Raised when SSH authentication fails safely."""
+
+
+class SshChannelError(SshConnectionError):
+    """Raised when an interactive SSH channel cannot operate safely."""

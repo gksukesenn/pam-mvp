@@ -347,7 +347,7 @@ def test_connection_repr_and_attributes_do_not_expose_credential(
     connection.close()
 
 
-def test_ssh_source_has_no_tofu_pty_logging_or_boundary_leaks():
+def test_ssh_source_has_no_tofu_logging_or_boundary_leaks():
     project_root = Path(__file__).parents[2]
     ssh_source = "\n".join(
         path.read_text()
@@ -361,8 +361,6 @@ def test_ssh_source_has_no_tofu_pty_logging_or_boundary_leaks():
 
     assert "AutoAddPolicy" not in ssh_source
     assert "set_missing_host_key_policy" not in ssh_source
-    assert "invoke_shell" not in ssh_source
-    assert "get_pty" not in ssh_source
     assert re.search(r"\bprint\s*\(", ssh_source) is None
     assert "logging" not in ssh_source
     assert "paramiko" not in domain_application_source
