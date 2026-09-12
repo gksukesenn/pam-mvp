@@ -13,6 +13,7 @@ from src.domain.audit import AuditEventType
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.session import SessionStatus
 from src.domain.target import HostKeyFingerprint, Target
+from src.ports.access_dependencies import BrokerCredential
 from tests.fakes.access_dependencies import (
     FakeAuditRepository,
     FakeIdGenerator,
@@ -25,7 +26,8 @@ from tests.fakes.access_dependencies import (
 from tests.fakes.policy_repository import FakePolicyRepository
 
 
-INTERNAL_CREDENTIAL = "vault-internal-password"
+INTERNAL_CREDENTIAL_BYTES = b"vault-internal-password"
+INTERNAL_CREDENTIAL = BrokerCredential(INTERNAL_CREDENTIAL_BYTES)
 
 
 @dataclass
@@ -85,7 +87,7 @@ def make_harness(
     *,
     targets: list[Target] | None = None,
     accounts: list[PrivilegedAccount] | None = None,
-    credential: object | None = INTERNAL_CREDENTIAL,
+    credential: BrokerCredential | None = INTERNAL_CREDENTIAL,
     broker_succeeds: bool = True,
 ) -> Harness:
     call_log: list[str] = []
@@ -161,9 +163,9 @@ def test_allowed_access_does_not_expose_resolved_credential():
         "decision",
         "session",
     }
-    assert INTERNAL_CREDENTIAL not in repr(result)
+    assert INTERNAL_CREDENTIAL_BYTES.decode() not in repr(result)
     assert all(
-        INTERNAL_CREDENTIAL not in repr(event)
+        INTERNAL_CREDENTIAL_BYTES.decode() not in repr(event)
         for event in harness.audit_repository.events
     )
 
@@ -237,9 +239,9 @@ def test_broker_failure_marks_session_failed_without_exposing_credential():
         AuditEventType.SESSION_OPENING,
         AuditEventType.SESSION_FAILED,
     ]
-    assert INTERNAL_CREDENTIAL not in repr(result)
+    assert INTERNAL_CREDENTIAL_BYTES.decode() not in repr(result)
     assert all(
-        INTERNAL_CREDENTIAL not in repr(event)
+        INTERNAL_CREDENTIAL_BYTES.decode() not in repr(event)
         for event in harness.audit_repository.events
     )
 

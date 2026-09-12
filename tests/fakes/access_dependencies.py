@@ -3,19 +3,23 @@ from datetime import datetime
 from src.domain.audit import AuditEvent
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.target import Target
+from src.ports.access_dependencies import BrokerCredential
 
 
 class FakeVault:
     def __init__(
         self,
-        credential: object | None,
+        credential: BrokerCredential | None,
         call_log: list[str] | None = None,
     ) -> None:
         self.credential = credential
         self.call_log = call_log
         self.calls: list[CredentialRef] = []
 
-    def resolve(self, credential_ref: CredentialRef) -> object | None:
+    def resolve(
+        self,
+        credential_ref: CredentialRef,
+    ) -> BrokerCredential | None:
         if self.call_log is not None:
             self.call_log.append("vault.resolve")
         self.calls.append(credential_ref)
@@ -30,13 +34,15 @@ class FakeSessionBroker:
     ) -> None:
         self.succeeds = succeeds
         self.call_log = call_log
-        self.calls: list[tuple[Target, PrivilegedAccount, object]] = []
+        self.calls: list[
+            tuple[Target, PrivilegedAccount, BrokerCredential]
+        ] = []
 
     def open_session(
         self,
         target: Target,
         privileged_account: PrivilegedAccount,
-        credential: object,
+        credential: BrokerCredential,
     ) -> bool:
         if self.call_log is not None:
             self.call_log.append("session_broker.open_session")
