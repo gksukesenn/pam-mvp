@@ -12,6 +12,7 @@ __pycache__/
 
 # Runtime databases
 *.db
+runtime/
 
 # IDE / OS
 .vscode/
