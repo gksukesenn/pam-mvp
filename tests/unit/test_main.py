@@ -29,6 +29,7 @@ def test_minimal_entrypoint_builds_graph_and_exits_without_workflow(
 
     result = main_module.main(
         [
+            "validate",
             "--auth-db",
             str(paths["auth"]),
             "--config-db",
