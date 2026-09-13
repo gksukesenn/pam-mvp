@@ -75,7 +75,10 @@ class AccessService:
         if account is None:
             return self._deny_with_reason(request, "account_not_found")
         if not account.enabled:
-            return self._deny_with_reason(request, "account_disabled")
+            return self._deny_with_reason(
+                request,
+                "privileged_account_disabled",
+            )
         if account.target_id != target.id:
             return self._deny_with_reason(request, "account_target_mismatch")
 

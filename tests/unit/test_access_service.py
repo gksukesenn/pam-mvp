@@ -71,22 +71,24 @@ def make_request() -> AccessRequest:
     )
 
 
-def make_target() -> Target:
+def make_target(*, enabled: bool = True) -> Target:
     return Target(
         id="target-001",
         name="production-server",
         host="server.example.test",
         port=22,
         expected_host_key=HostKeyFingerprint("SHA256:abc123"),
+        enabled=enabled,
     )
 
 
-def make_account() -> PrivilegedAccount:
+def make_account(*, enabled: bool = True) -> PrivilegedAccount:
     return PrivilegedAccount(
         id="account-001",
         target_id="target-001",
         username="root",
         credential_ref=CredentialRef("credential-001"),
+        enabled=enabled,
     )
 
 
@@ -586,6 +588,8 @@ def test_missing_target_fails_closed_before_vault_or_broker():
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "target_not_found"
     assert result.session is None
+    assert harness.target_repository.calls == ["target-001"]
+    assert harness.account_repository.calls == []
     assert harness.vault.calls == []
     assert harness.broker.calls == []
     assert harness.audit_repository.events[0].event_type is (
@@ -604,8 +608,63 @@ def test_missing_account_fails_closed_before_vault_or_broker():
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "account_not_found"
     assert result.session is None
+    assert harness.target_repository.calls == ["target-001"]
+    assert harness.account_repository.calls == ["target-001"]
     assert harness.vault.calls == []
     assert harness.broker.calls == []
+
+
+def test_disabled_target_denies_before_account_vault_broker_or_session():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        targets=[make_target(enabled=False)],
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.decision.effect is AccessEffect.DENY
+    assert result.decision.reason == "target_disabled"
+    assert result.session is None
+    assert harness.target_repository.calls == ["target-001"]
+    assert harness.account_repository.calls == []
+    assert harness.vault.calls == []
+    assert harness.broker.calls == []
+    assert harness.call_log == [
+        "policy_repository.find_matching",
+        "target_repository.get",
+        "audit.append:access_denied",
+    ]
+    event = harness.audit_repository.events[0]
+    assert event.event_type is AuditEventType.ACCESS_DENIED
+    assert event.reason_code == "target_disabled"
+    assert event.session_id is None
+
+
+def test_disabled_account_denies_before_vault_broker_or_session():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        accounts=[make_account(enabled=False)],
+    )
+
+    result = harness.service.handle(make_request(), harness.terminal_io)
+
+    assert result.decision.effect is AccessEffect.DENY
+    assert result.decision.reason == "privileged_account_disabled"
+    assert result.session is None
+    assert harness.target_repository.calls == ["target-001"]
+    assert harness.account_repository.calls == ["target-001"]
+    assert harness.vault.calls == []
+    assert harness.broker.calls == []
+    assert harness.call_log == [
+        "policy_repository.find_matching",
+        "target_repository.get",
+        "account_repository.find_for_target",
+        "audit.append:access_denied",
+    ]
+    event = harness.audit_repository.events[0]
+    assert event.event_type is AuditEventType.ACCESS_DENIED
+    assert event.reason_code == "privileged_account_disabled"
+    assert event.session_id is None
 
 
 def test_missing_credential_fails_closed_before_broker():
