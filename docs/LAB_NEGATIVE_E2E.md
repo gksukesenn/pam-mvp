@@ -1,7 +1,9 @@
 # PAM lab negative security validation
 
 Run these checks manually from the repository with the virtual environment
-active. Codex does not run live network checks. Never use
+active after completing [Lab Setup](LAB_SETUP.md). That setup guide explains
+which target IP and fingerprint must be provisioned for a different VM. Codex
+does not run live network checks. Never use
 `runtime/lab` as a scenario destination: the preparation tool rejects it.
 Every scenario destination is one-shot; remove it manually before recreating
 it. Do not prepare a copy while another PAM CLI process is writing the
@@ -59,7 +61,9 @@ baseline Vault:
 
 ```bash
 python -m src.tools.provision_lab \
-    --runtime-dir ./runtime/scenarios/wrong-target-password
+    --runtime-dir ./runtime/scenarios/wrong-target-password \
+    --target-host "${TARGET_IP}" \
+    --host-key-fingerprint "${TARGET_FINGERPRINT}"
 python -m src.main access \
     --runtime-dir ./runtime/scenarios/wrong-target-password \
     --username goksu --target-id target-001
@@ -70,6 +74,10 @@ intentionally wrong `pamadmin` SSH password. Access must authenticate the PAM
 user, verify the host key, fail SSH password authentication, open no shell,
 print `Privileged session failed.`, and exit `4`. Passwords must not appear in
 CLI or audit output.
+
+Set `TARGET_IP` and `TARGET_FINGERPRINT` to the non-secret values independently
+verified for the running guest, as shown in [Lab Setup](LAB_SETUP.md). The
+tool's built-in values describe only the completed tested lab.
 
 ## Maximum elapsed duration
 

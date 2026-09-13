@@ -2,7 +2,12 @@
 
 ## Prerequisites
 
-- `linux-server-1` is running and `192.168.122.227` is reachable.
+- Complete [Lab Setup](LAB_SETUP.md) first. It explains how to create the VM,
+  discover its address, verify its host fingerprint, and provision portable
+  target metadata.
+- `linux-server-1` is running and the address stored in the provisioned
+  `config.db` is reachable. The completed test environment used
+  `192.168.122.227`; that address is not universal.
 - `runtime/lab` has been created with the provisioning tool.
 - The project virtual environment is active.
 
@@ -36,21 +41,10 @@ startup/internal failure use exit codes `2`, `3`, `4`, and `1`, respectively.
 After an allowed session, confirm `runtime/lab/audit.db` exists. A normal
 session contains `ACCESS_ALLOWED`, `SESSION_OPENING`, `SESSION_ACTIVE`, and
 `SESSION_CLOSED`, written by `AccessService`. Verify integrity without
-displaying event MACs or keys:
+displaying events, MACs, or keys:
 
 ```bash
-python - <<'PY'
-from pathlib import Path
-
-from src.infrastructure.audit.sqlite_audit_repository import SQLiteAuditRepository
-from src.infrastructure.security.file_key_provider import FileKeyProvider
-
-root = Path("runtime/lab")
-repository = SQLiteAuditRepository(
-    root / "audit.db",
-    FileKeyProvider(root / "audit.key"),
-)
-repository.verify_integrity()
-print("Audit integrity verified.")
-PY
+python -m src.tools.verify_audit --runtime-dir ./runtime/lab
 ```
+
+Expected: `Audit integrity: OK` and exit `0`.
