@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from src.application.policy_evaluator import PolicyEvaluator
 from src.domain.access import (
     AccessAction,
@@ -8,6 +10,16 @@ from src.domain.access import (
     AccessRequest,
 )
 from tests.fakes.policy_repository import FakePolicyRepository
+
+
+class FailingPolicyRepository:
+    def find_matching(
+        self,
+        user_id: str,
+        target_id: str,
+        action: AccessAction,
+    ) -> list[AccessPolicy]:
+        raise RuntimeError("policy storage unavailable")
 
 
 def make_policy(
@@ -131,6 +143,13 @@ def test_requires_approval_takes_precedence_over_allow():
 
     assert decision.effect is AccessEffect.DENY
     assert decision.reason == "approval_not_supported"
+
+
+def test_repository_failure_is_not_reinterpreted_as_an_allow():
+    evaluator = PolicyEvaluator(FailingPolicyRepository())
+
+    with pytest.raises(RuntimeError, match="policy storage unavailable"):
+        evaluator.evaluate(make_request())
 
 
 def test_evaluator_queries_repository_with_request_values():
