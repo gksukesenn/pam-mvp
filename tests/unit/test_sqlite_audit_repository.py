@@ -17,6 +17,7 @@ from src.domain.access import (
     AccessRequest,
 )
 from src.domain.audit import AuditEvent, AuditEventType
+from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.session import SessionStatus
 from src.domain.target import HostKeyFingerprint, Target
@@ -48,6 +49,7 @@ PAM_PASSWORD_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-PAM-PASSWORD"
 MASTER_KEY_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-MASTER-KEY-MARKER"
 TERMINAL_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-TERMINAL-MARKER"
 TRANSCRIPT_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-SSH-TRANSCRIPT"
+PRINCIPAL = AuthenticatedPrincipal(user_id="user-001", username="goksu")
 
 
 class StaticKeyProvider:
@@ -356,7 +358,7 @@ def test_access_service_allow_flow_persists_complete_lifecycle(
         )
     )
 
-    result = service.handle(make_request(), terminal_io)
+    result = service.handle(PRINCIPAL, make_request(), terminal_io)
 
     assert result.session is not None
     assert result.session.status is SessionStatus.CLOSED
@@ -381,7 +383,7 @@ def test_access_service_deny_persists_event_without_vault_or_broker(
         make_access_service(repository, [])
     )
 
-    result = service.handle(make_request(), terminal_io)
+    result = service.handle(PRINCIPAL, make_request(), terminal_io)
 
     assert result.session is None
     assert vault.calls == []
@@ -404,7 +406,7 @@ def test_access_service_broker_failure_persists_session_failed(
         broker_open_error=RuntimeError("controlled broker failure"),
     )
 
-    result = service.handle(make_request(), terminal_io)
+    result = service.handle(PRINCIPAL, make_request(), terminal_io)
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
@@ -431,7 +433,7 @@ def test_access_flow_does_not_persist_secret_or_terminal_markers(
     vault.master_key_marker = MASTER_KEY_MARKER
     terminal_io.terminal_content_marker = TERMINAL_MARKER
     terminal_io.transcript_marker = TRANSCRIPT_MARKER
-    service.handle(make_request(), terminal_io)
+    service.handle(PRINCIPAL, make_request(), terminal_io)
 
     database_bytes = database_path.read_bytes()
     forbidden_markers = (
@@ -459,7 +461,7 @@ def test_access_service_does_not_swallow_audit_persistence_failure(
             connection.execute("DROP TABLE audit_events")
 
     with pytest.raises(AuditStorageError):
-        service.handle(make_request(), terminal_io)
+        service.handle(PRINCIPAL, make_request(), terminal_io)
 
     assert vault.calls == []
     assert broker.calls == []

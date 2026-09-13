@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from src.application.policy_evaluator import PolicyEvaluator
 from src.domain.access import AccessDecision, AccessEffect, AccessRequest
+from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.audit import AuditEvent, AuditEventType
 from src.domain.session import Session, SessionStatus
 from src.ports.access_dependencies import (
@@ -58,9 +59,22 @@ class AccessService:
 
     def handle(
         self,
+        principal: AuthenticatedPrincipal,
         request: AccessRequest,
         terminal_io: TerminalIO,
     ) -> AccessResult:
+        if not isinstance(principal, AuthenticatedPrincipal):
+            raise TypeError("principal must be authenticated")
+        if principal.user_id != request.user_id:
+            return self._deny(
+                request,
+                AccessDecision(
+                    effect=AccessEffect.DENY,
+                    reason="authenticated_identity_mismatch",
+                ),
+                actor_user_id=principal.user_id,
+            )
+
         decision = self._policy_evaluator.evaluate(request)
         if decision.effect is not AccessEffect.ALLOW:
             return self._deny(request, decision)
@@ -216,6 +230,7 @@ class AccessService:
         self,
         request: AccessRequest,
         decision: AccessDecision,
+        actor_user_id: str | None = None,
     ) -> AccessResult:
         self._append_event(
             request=request,
@@ -223,6 +238,7 @@ class AccessService:
             session_id=None,
             result="denied",
             reason_code=decision.reason,
+            actor_user_id=actor_user_id,
         )
         return AccessResult(decision=decision, session=None)
 
@@ -233,13 +249,18 @@ class AccessService:
         session_id: str | None,
         result: str,
         reason_code: str | None = None,
+        actor_user_id: str | None = None,
     ) -> None:
         self._audit_repository.append(
             AuditEvent(
                 id=self._id_generator.new_id(),
                 timestamp=self._clock.now(),
                 event_type=event_type,
-                actor_user_id=request.user_id,
+                actor_user_id=(
+                    request.user_id
+                    if actor_user_id is None
+                    else actor_user_id
+                ),
                 target_id=request.target_id,
                 session_id=session_id,
                 result=result,

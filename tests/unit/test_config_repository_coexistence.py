@@ -13,6 +13,7 @@ from src.domain.access import (
     AccessPolicy,
     AccessRequest,
 )
+from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.target import HostKeyFingerprint, Target
 from src.infrastructure.config.sqlite_privileged_account_repository import (
@@ -49,6 +50,7 @@ SECRET_MARKERS = (
     b"TERMINAL-CONTENT-MARKER",
     b"SSH-TRANSCRIPT-MARKER",
 )
+PRINCIPAL = AuthenticatedPrincipal(user_id="user-001", username="goksu")
 
 
 def make_access_harness(
@@ -194,7 +196,7 @@ def test_ambiguous_real_account_configuration_stops_before_vault_and_broker(
     )
 
     with pytest.raises(AmbiguousPrivilegedAccountError):
-        service.handle(request, FakeTerminalIO())
+        service.handle(PRINCIPAL, request, FakeTerminalIO())
 
     assert vault.calls == []
     assert broker.calls == []
@@ -224,7 +226,7 @@ def test_real_configuration_storage_failure_stops_before_vault_and_broker(
     )
 
     with pytest.raises(ConfigStorageError):
-        service.handle(request, FakeTerminalIO())
+        service.handle(PRINCIPAL, request, FakeTerminalIO())
 
     assert vault.calls == []
     assert broker.calls == []

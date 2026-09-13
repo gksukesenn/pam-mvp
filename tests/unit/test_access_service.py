@@ -8,11 +8,13 @@ from src.application.access_service import AccessResult, AccessService
 from src.application.policy_evaluator import PolicyEvaluator
 from src.domain.access import (
     AccessAction,
+    AccessDecision,
     AccessEffect,
     AccessPolicy,
     AccessRequest,
 )
 from src.domain.audit import AuditEvent, AuditEventType
+from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.session import Session, SessionStatus
 from src.domain.target import HostKeyFingerprint, Target
@@ -34,6 +36,7 @@ from tests.fakes.policy_repository import FakePolicyRepository
 INTERNAL_CREDENTIAL_BYTES = b"vault-internal-password"
 INTERNAL_CREDENTIAL = BrokerCredential(INTERNAL_CREDENTIAL_BYTES)
 MAX_SESSION_DURATION = timedelta(minutes=30)
+PRINCIPAL = AuthenticatedPrincipal(user_id="user-001", username="goksu")
 
 
 @dataclass
@@ -162,7 +165,9 @@ def make_harness(
 def test_allowed_access_relays_and_closes_session_normally():
     harness = make_harness([make_policy(AccessEffect.ALLOW)])
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.ALLOW
     assert result.session is not None
@@ -213,7 +218,7 @@ def test_positive_max_session_duration_is_accepted_and_forwarded():
         max_session_duration=duration,
     )
 
-    harness.service.handle(make_request(), harness.terminal_io)
+    harness.service.handle(PRINCIPAL, make_request(), harness.terminal_io)
 
     assert harness.brokered_session.max_durations == [duration]
 
@@ -258,7 +263,9 @@ def test_max_duration_timeout_closes_session_after_relay(
         mark_closed,
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.session is not None
     assert result.session.status is SessionStatus.CLOSED
@@ -301,7 +308,9 @@ def test_timeout_with_cleanup_failure_uses_broker_close_failure_semantics():
         close_error=RuntimeError("controlled close failure"),
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
@@ -318,7 +327,9 @@ def test_timeout_with_cleanup_failure_uses_broker_close_failure_semantics():
 def test_allowed_access_does_not_expose_resolved_credential():
     harness = make_harness([make_policy(AccessEffect.ALLOW)])
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert {field.name for field in fields(AccessResult)} == {
         "decision",
@@ -334,7 +345,9 @@ def test_allowed_access_does_not_expose_resolved_credential():
 def test_explicit_deny_stops_before_vault_broker_and_session_creation():
     harness = make_harness([make_policy(AccessEffect.DENY)])
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "policy-deny"
@@ -356,7 +369,9 @@ def test_explicit_deny_stops_before_vault_broker_and_session_creation():
 def test_no_matching_policy_uses_the_same_safe_deny_path():
     harness = make_harness([])
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "no_matching_policy"
@@ -368,12 +383,72 @@ def test_no_matching_policy_uses_the_same_safe_deny_path():
     ]
 
 
+def test_authenticated_identity_mismatch_stops_before_policy_and_access(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session_construction_calls: list[dict[str, object]] = []
+
+    def track_session_construction(**values: object) -> None:
+        session_construction_calls.append(values)
+        raise AssertionError("session must not be constructed")
+
+    monkeypatch.setattr(
+        access_service_module,
+        "Session",
+        track_session_construction,
+    )
+    spoofed_policy = AccessPolicy(
+        id="policy-spoofed-user-allow",
+        user_id="user-002",
+        target_id="target-001",
+        action=AccessAction.OPEN_PRIVILEGED_SESSION,
+        effect=AccessEffect.ALLOW,
+    )
+    harness = make_harness([spoofed_policy])
+    spoofed_request = AccessRequest(
+        id="request-spoofed-user",
+        user_id="user-002",
+        target_id="target-001",
+        action=AccessAction.OPEN_PRIVILEGED_SESSION,
+        requested_at=datetime(2026, 9, 12, 10, tzinfo=UTC),
+    )
+
+    result = harness.service.handle(
+        PRINCIPAL,
+        spoofed_request,
+        harness.terminal_io,
+    )
+
+    assert result.decision == AccessDecision(
+        effect=AccessEffect.DENY,
+        reason="authenticated_identity_mismatch",
+    )
+    assert result.session is None
+    assert harness.policy_repository.queries == []
+    assert harness.target_repository.calls == []
+    assert harness.account_repository.calls == []
+    assert harness.vault.calls == []
+    assert harness.broker.calls == []
+    assert harness.brokered_session.relay_calls == []
+    assert harness.brokered_session.close_calls == 0
+    assert session_construction_calls == []
+    assert harness.id_generator.calls == 1
+    assert len(harness.audit_repository.events) == 1
+    event = harness.audit_repository.events[0]
+    assert event.event_type is AuditEventType.ACCESS_DENIED
+    assert event.actor_user_id == "user-001"
+    assert event.target_id == "target-001"
+    assert event.reason_code == "authenticated_identity_mismatch"
+
+
 def test_requires_approval_uses_the_same_safe_deny_path():
     harness = make_harness(
         [make_policy(AccessEffect.REQUIRES_APPROVAL)]
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "approval_not_supported"
@@ -391,7 +466,9 @@ def test_broker_open_failure_marks_session_failed_without_relay():
         broker_open_error=RuntimeError("controlled broker open failure"),
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
@@ -421,7 +498,9 @@ def test_relay_failure_marks_active_session_failed_and_closes_brokered_session()
         relay_error=RuntimeError("controlled relay failure"),
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
@@ -454,7 +533,9 @@ def test_brokered_session_close_failure_marks_session_failed():
         close_error=RuntimeError("controlled close failure"),
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
@@ -482,7 +563,9 @@ def test_relay_failure_takes_precedence_when_cleanup_also_fails():
         close_error=RuntimeError("controlled close failure"),
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.session is not None
     assert result.session.status is SessionStatus.FAILED
@@ -543,7 +626,9 @@ def test_opening_audit_failure_marks_session_failed_before_propagating(
     )
 
     with pytest.raises(ControlledAuditFailure):
-        harness.service.handle(make_request(), harness.terminal_io)
+        harness.service.handle(
+            PRINCIPAL, make_request(), harness.terminal_io
+        )
 
     assert len(failed_sessions) == 1
     session = failed_sessions[0]
@@ -566,7 +651,9 @@ def test_active_audit_failure_fails_session_and_preserves_audit_error(
     )
 
     with pytest.raises(ControlledAuditFailure):
-        harness.service.handle(make_request(), harness.terminal_io)
+        harness.service.handle(
+            PRINCIPAL, make_request(), harness.terminal_io
+        )
 
     assert len(failed_sessions) == 1
     session = failed_sessions[0]
@@ -583,7 +670,9 @@ def test_missing_target_fails_closed_before_vault_or_broker():
         targets=[],
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "target_not_found"
@@ -603,7 +692,9 @@ def test_missing_account_fails_closed_before_vault_or_broker():
         accounts=[],
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "account_not_found"
@@ -620,7 +711,9 @@ def test_disabled_target_denies_before_account_vault_broker_or_session():
         targets=[make_target(enabled=False)],
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "target_disabled"
@@ -646,7 +739,9 @@ def test_disabled_account_denies_before_vault_broker_or_session():
         accounts=[make_account(enabled=False)],
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "privileged_account_disabled"
@@ -673,7 +768,9 @@ def test_missing_credential_fails_closed_before_broker():
         credential=None,
     )
 
-    result = harness.service.handle(make_request(), harness.terminal_io)
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
 
     assert result.decision.effect is AccessEffect.DENY
     assert result.decision.reason == "credential_not_found"
