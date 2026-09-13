@@ -3,6 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 import secrets
 import socket
+import stat
 
 import pytest
 
@@ -171,6 +172,10 @@ def test_build_application_wires_real_graph_without_network_or_credentials(
     )
     assert all(path.exists() for path in database_paths)
     assert len({path.resolve() for path in database_paths}) == 4
+    assert all(
+        stat.S_IMODE(path.stat().st_mode) == 0o600
+        for path in database_paths
+    )
     assert all(PLAINTEXT_MARKER not in path.read_bytes() for path in database_paths)
 
 

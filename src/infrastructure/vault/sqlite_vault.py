@@ -7,6 +7,10 @@ from src.infrastructure.vault.errors import (
     DuplicateCredentialError,
     VaultError,
 )
+from src.infrastructure.sqlite_security import (
+    DatabasePermissionError,
+    ensure_owner_only_database_file,
+)
 from src.ports.security import EncryptedSecret, SecretCipher
 from src.ports.session_broker import BrokerCredential
 
@@ -84,6 +88,7 @@ class SQLiteVault:
 
     def _initialize_schema(self) -> None:
         try:
+            ensure_owner_only_database_file(self._database_path)
             with closing(sqlite3.connect(self._database_path)) as connection:
                 with connection:
                     connection.execute(
@@ -96,5 +101,5 @@ class SQLiteVault:
                         )
                         """
                     )
-        except sqlite3.Error as error:
+        except (DatabasePermissionError, sqlite3.Error) as error:
             raise VaultError("vault could not be initialized") from error

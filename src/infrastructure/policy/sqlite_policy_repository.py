@@ -9,6 +9,10 @@ from src.infrastructure.policy.errors import (
     MalformedPolicyError,
     PolicyStorageError,
 )
+from src.infrastructure.sqlite_security import (
+    DatabasePermissionError,
+    ensure_owner_only_database_file,
+)
 
 
 SCHEMA_COLUMNS = (
@@ -142,6 +146,7 @@ class SQLitePolicyRepository:
 
     def _initialize_schema(self) -> None:
         try:
+            ensure_owner_only_database_file(self._database_path)
             with closing(sqlite3.connect(self._database_path)) as connection:
                 with connection:
                     connection.execute(
@@ -167,7 +172,7 @@ class SQLitePolicyRepository:
                         )
         except PolicyStorageError:
             raise
-        except sqlite3.Error as error:
+        except (DatabasePermissionError, sqlite3.Error) as error:
             raise PolicyStorageError(
                 "policy database could not be initialized"
             ) from error

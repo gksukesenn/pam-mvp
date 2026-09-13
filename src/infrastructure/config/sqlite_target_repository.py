@@ -8,6 +8,10 @@ from src.infrastructure.config.errors import (
     DuplicateTargetError,
     MalformedTargetError,
 )
+from src.infrastructure.sqlite_security import (
+    DatabasePermissionError,
+    ensure_owner_only_database_file,
+)
 
 
 SCHEMA_DEFINITION = (
@@ -145,6 +149,7 @@ class SQLiteTargetRepository:
 
     def _initialize_schema(self) -> None:
         try:
+            ensure_owner_only_database_file(self._database_path)
             with closing(sqlite3.connect(self._database_path)) as connection:
                 with connection:
                     connection.execute(
@@ -171,7 +176,7 @@ class SQLiteTargetRepository:
                         )
         except ConfigStorageError:
             raise
-        except sqlite3.Error as error:
+        except (DatabasePermissionError, sqlite3.Error) as error:
             raise ConfigStorageError(
                 "target database could not be initialized"
             ) from error

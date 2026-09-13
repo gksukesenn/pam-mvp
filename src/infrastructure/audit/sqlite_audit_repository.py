@@ -17,6 +17,10 @@ from src.infrastructure.audit.integrity import (
     canonical_event_bytes,
     macs_match,
 )
+from src.infrastructure.sqlite_security import (
+    DatabasePermissionError,
+    ensure_owner_only_database_file,
+)
 from src.ports.security import KeyProvider
 
 
@@ -327,6 +331,7 @@ class SQLiteAuditRepository:
 
     def _initialize_schema(self) -> None:
         try:
+            ensure_owner_only_database_file(self._database_path)
             with closing(sqlite3.connect(self._database_path)) as connection:
                 try:
                     connection.execute("BEGIN IMMEDIATE")
@@ -357,7 +362,7 @@ class SQLiteAuditRepository:
                     raise
         except AuditStorageError:
             raise
-        except sqlite3.Error as error:
+        except (DatabasePermissionError, sqlite3.Error) as error:
             raise AuditStorageError(
                 "audit database could not be initialized"
             ) from error
