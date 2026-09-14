@@ -92,6 +92,11 @@ deployment. See [Known Limitations](docs/KNOWN_LIMITATIONS.md).
 
 The commands must be run from the repository root on Linux.
 
+The supported interpreter range is **Python 3.11 through 3.14**
+(`>=3.11,<3.15`). The interactive terminal implementation requires a
+Linux/POSIX terminal. Some domain and adapter tests may run elsewhere, but
+the product CLI does not claim Windows support. Docker is not required.
+
 1. Build the host and Debian target by following
    [Lab Setup](docs/LAB_SETUP.md). It includes portable target-IP and host-key
    configuration; do not assume the tested example values match another VM.
@@ -112,11 +117,31 @@ python -m src.main access \
 ## Tests
 
 The automated suite uses fakes at the final network boundary; it does not
-connect to the Debian VM. From an environment in which the test dependency is
-available:
+connect to the Debian VM.
+
+For a runtime-only editable installation:
 
 ```bash
-.venv/bin/pytest -q
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip==26.2.1
+python -m pip install -r requirements.txt
+```
+
+For development, install the separately pinned tool set instead; it includes
+the editable project and runtime dependencies:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip==26.2.1
+python -m pip install -r requirements-dev.txt
+```
+
+Run the tests from the repository root:
+
+```bash
+pytest -q
 ```
 
 The suite exercises domain invariants, fail-closed ordering, real SQLite and
@@ -125,6 +150,48 @@ terminal restoration, provisioning, CLI result mapping, runtime permissions,
 and audit integrity. Test volume alone is not treated as proof of security.
 Manual environment-specific evidence is recorded in
 [Live Validation](docs/LIVE_VALIDATION.md).
+
+## Development checks
+
+The authoritative project and tool configuration is in `pyproject.toml`.
+Runtime dependencies are declared there and installed through
+`requirements.txt`; pinned development tools are separated in
+`requirements-dev.txt`.
+
+```bash
+# Import and correctness checks
+python -m compileall -q src tests
+python -m pip check
+
+# E/F, import-order, pyupgrade, and Bugbear lint rules
+ruff check src tests scripts
+
+# Incremental type check of domain, application, and ports
+mypy
+
+# Statement and branch coverage; configured minimum is 84%
+pytest -q --cov=src --cov-branch --cov-report=term-missing
+
+# Point-in-time audits of declared runtime and installed development dependencies
+pip-audit . --progress-spinner off
+pip-audit --local --progress-spinner off
+
+# detect-secrets scan of Git-tracked files; candidate values are withheld
+python scripts/check_secrets.py
+```
+
+The measured Phase 10B-4 statement-plus-branch total is 86%. The 84% floor
+prevents a material regression without encouraging low-value tests for every
+defensive OS-error branch. A passing dependency audit means no vulnerability
+known to that audit service at scan time; it is not a permanent guarantee.
+
+GitHub Actions runs compile, lint, core-boundary typing, tests, and coverage on
+Linux with Python 3.11 and 3.14. A separate Linux job performs dependency and
+tracked-file secret audits. CI never starts libvirt, contacts the Debian lab,
+or reads a local `runtime/` directory.
+
+Licensing and redistribution terms remain pending repository-owner/employer
+authorization. No software license is granted by this README.
 
 ## Documentation
 

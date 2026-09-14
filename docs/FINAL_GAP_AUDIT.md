@@ -37,6 +37,19 @@ Network/live-VM activity: none
 > secret-free stderr message and no traceback. Test-tree reorganization and
 > protected operator diagnostics remain deferred.
 
+> Phase 10B-4 resolution: S-008 and S-009 were subsequently resolved with
+> declared Python/Linux support, installable project metadata, separated and
+> pinned runtime/development dependencies, Ruff and incremental mypy policy,
+> measured branch coverage with an 84% regression floor, dependency and
+> tracked-file secret audits, and Linux GitHub Actions for Python 3.11 and
+> 3.14. A fresh isolated Python 3.14.7 environment installed from the tracked
+> development requirements and passed CLI/import, compile, lint, type, test,
+> coverage, dependency-audit, and secret-scan checks. The lower Python 3.11
+> bound is configured for hosted CI but was not available for local execution.
+> Dependency audit results remain point-in-time evidence, not a permanent
+> vulnerability-free claim. The workflow configuration was parsed locally;
+> its first hosted execution necessarily remains pending a future commit/push.
+
 # Executive Summary
 
 The core functional MVP is complete and its supported access path is credible. The implementation authenticates a local PAM user, binds authorization to the authenticated principal, evaluates policy fail-closed, resolves an encrypted target credential only after authorization and configuration checks, verifies the pinned SSH host key before password authentication, brokers an interactive PTY under a monotonic duration limit, restores terminal state, and appends HMAC-chained audit events. The supplied record of successful and negative live validation is consistent with the code and automated tests.

@@ -1,10 +1,10 @@
-from contextlib import closing
-from datetime import timedelta
-from pathlib import Path
 import secrets
 import socket
 import sqlite3
 import stat
+from contextlib import closing
+from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -29,9 +29,8 @@ from src.tools.provision_lab import (
     provision_lab,
 )
 
-
-PAM_PASSWORD = "PAM-PROVISIONING-LOGIN-SECRET-MARKER"
-TARGET_PASSWORD = "PAM-PROVISIONING-TARGET-SECRET-MARKER"
+PAM_PASSWORD = "PAM-PROVISIONING-LOGIN-SECRET-MARKER"  # pragma: allowlist secret
+TARGET_PASSWORD = "PAM-PROVISIONING-TARGET-SECRET-MARKER"  # pragma: allowlist secret
 
 
 def write_key(path: Path, key: bytes, mode: int = 0o600) -> None:

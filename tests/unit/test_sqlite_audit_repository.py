@@ -1,10 +1,10 @@
+import inspect
+import secrets
+import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
-import inspect
 from pathlib import Path
-import secrets
-import sqlite3
 
 import pytest
 
@@ -41,7 +41,6 @@ from tests.fakes.access_dependencies import (
     FixedClock,
 )
 from tests.fakes.policy_repository import FakePolicyRepository
-
 
 CREDENTIAL_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-CREDENTIAL-MARKER"
 TARGET_PASSWORD_MARKER = b"AUDIT-DB-MUST-NOT-CONTAIN-TARGET-PASSWORD"

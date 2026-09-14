@@ -1,14 +1,14 @@
 """Prepare isolated, one-shot negative-security lab runtimes."""
 
 import argparse
-from collections.abc import Sequence
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import sys
-
+from collections.abc import Sequence
+from contextlib import closing
+from dataclasses import dataclass
+from pathlib import Path
 
 SCENARIOS = (
     "deny",
@@ -258,12 +258,14 @@ def _mutate_copied_config(database_path: Path, scenario: str) -> None:
 
     statement, parameters = statements[scenario]
     try:
-        with sqlite3.connect(database_path) as connection:
-            cursor = connection.execute(statement, parameters)
-            if cursor.rowcount != 1:
-                raise NegativeLabPreparationError(
-                    "baseline configuration does not match scenario expectations"
-                )
+        with closing(sqlite3.connect(database_path)) as connection:
+            with connection:
+                cursor = connection.execute(statement, parameters)
+                if cursor.rowcount != 1:
+                    raise NegativeLabPreparationError(
+                        "baseline configuration does not match "
+                        "scenario expectations"
+                    )
     except NegativeLabPreparationError:
         raise
     except sqlite3.Error:
@@ -274,21 +276,22 @@ def _mutate_copied_config(database_path: Path, scenario: str) -> None:
 
 def _tamper_copied_audit(database_path: Path) -> None:
     try:
-        with sqlite3.connect(database_path) as connection:
-            cursor = connection.execute(
-                """
-                UPDATE audit_events
-                SET target_id = ?
-                WHERE sequence_no = (
-                    SELECT MIN(sequence_no) FROM audit_events
-                ) AND target_id <> ?
-                """,
-                ("tampered-target-id", "tampered-target-id"),
-            )
-            if cursor.rowcount != 1:
-                raise NegativeLabPreparationError(
-                    "baseline audit database has no suitable event to tamper"
+        with closing(sqlite3.connect(database_path)) as connection:
+            with connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE audit_events
+                    SET target_id = ?
+                    WHERE sequence_no = (
+                        SELECT MIN(sequence_no) FROM audit_events
+                    ) AND target_id <> ?
+                    """,
+                    ("tampered-target-id", "tampered-target-id"),
                 )
+                if cursor.rowcount != 1:
+                    raise NegativeLabPreparationError(
+                        "baseline audit database has no suitable event to tamper"
+                    )
     except NegativeLabPreparationError:
         raise
     except sqlite3.Error:

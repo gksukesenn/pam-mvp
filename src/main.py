@@ -1,12 +1,12 @@
 """Command-line boundary for the PAM MVP."""
 
 import argparse
-from collections.abc import Sequence
-from datetime import timedelta
 import getpass
-from pathlib import Path
 import stat
 import sys
+from collections.abc import Sequence
+from datetime import timedelta
+from pathlib import Path
 
 from src.application.access_service import AccessResult
 from src.application.authentication_service import AuthenticationFailedError
@@ -16,7 +16,6 @@ from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.session import SessionStatus
 from src.infrastructure.runtime import SystemClock, UuidIdGenerator
 from src.infrastructure.terminal.terminal_mode import raw_terminal_mode
-
 
 EXIT_SUCCESS = 0
 EXIT_INTERNAL_FAILURE = 1

@@ -9,17 +9,16 @@ remove it manually before provisioning again. Existing files are never wiped.
 import argparse
 import base64
 import binascii
-from collections.abc import Callable, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass
 import getpass
 import hmac
 import os
-from pathlib import Path
 import secrets
 import stat
 import sys
-from typing import Iterator
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
 from src.domain.access import AccessAction, AccessEffect, AccessPolicy
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
@@ -42,7 +41,6 @@ from src.infrastructure.security.aes_gcm_cipher import AesGcmSecretCipher
 from src.infrastructure.security.errors import KeyProviderError
 from src.infrastructure.security.file_key_provider import FileKeyProvider
 from src.infrastructure.vault.sqlite_vault import SQLiteVault
-
 
 DEFAULT_USER_ID = "user-001"
 DEFAULT_USERNAME = "goksu"

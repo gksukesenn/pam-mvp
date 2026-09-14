@@ -1,17 +1,16 @@
-from datetime import timedelta
 import inspect
-from pathlib import Path
 import re
+from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
+import src.infrastructure.ssh.terminal_relay as relay_module
 from src.infrastructure.ssh.errors import SshChannelError
 from src.infrastructure.ssh.interactive_channel import InteractiveSshChannel
 from src.infrastructure.ssh.paramiko_connection import VerifiedSshConnection
-import src.infrastructure.ssh.terminal_relay as relay_module
 from src.infrastructure.ssh.terminal_relay import relay_terminal
 from src.ports.session_broker import RelayOutcome
-
 
 TERMINAL_CONTENT = b"terminal-test-content\x00\xff"
 MAX_DURATION = timedelta(seconds=10)

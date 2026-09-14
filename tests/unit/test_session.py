@@ -4,7 +4,6 @@ import pytest
 
 from src.domain.session import Session, SessionStatus
 
-
 STARTED_AT = datetime(2026, 9, 12, 10, tzinfo=UTC)
 ENDED_AT = datetime(2026, 9, 12, 10, 5, tzinfo=UTC)
 

@@ -1,6 +1,6 @@
+import sqlite3
 from contextlib import closing
 from pathlib import Path
-import sqlite3
 
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.infrastructure.config.errors import (
@@ -13,7 +13,6 @@ from src.infrastructure.sqlite_security import (
     DatabasePermissionError,
     ensure_owner_only_database_file,
 )
-
 
 SCHEMA_DEFINITION = (
     ("id", "TEXT", 0, None, 1),

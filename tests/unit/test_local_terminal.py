@@ -8,7 +8,6 @@ from src.infrastructure.terminal.local_terminal_io import LocalTerminalIO
 from src.infrastructure.terminal.terminal_mode import raw_terminal_mode
 from src.ports.session_broker import TerminalIO
 
-
 TERMINAL_MARKER = b"terminal-bytes\x00\xff"
 
 

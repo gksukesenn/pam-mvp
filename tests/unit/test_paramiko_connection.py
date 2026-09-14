@@ -1,10 +1,11 @@
+import re
 from dataclasses import fields
 from pathlib import Path
-import re
 
 import paramiko
 import pytest
 
+import src.infrastructure.ssh.paramiko_connection as connection_module
 from src.application.access_service import AccessResult
 from src.domain.audit import AuditEvent
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
@@ -16,14 +17,12 @@ from src.infrastructure.ssh.errors import (
     SshConnectionError,
 )
 from src.infrastructure.ssh.host_key import calculate_sha256_fingerprint
-import src.infrastructure.ssh.paramiko_connection as connection_module
 from src.infrastructure.ssh.paramiko_connection import (
-    ParamikoSshConnector,
     SSH_DISABLED_ALGORITHMS,
+    ParamikoSshConnector,
     VerifiedSshConnection,
 )
 from src.ports.session_broker import BrokerCredential
-
 
 CREDENTIAL_BYTES = b"temporary-ssh-test-credential"
 

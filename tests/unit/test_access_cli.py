@@ -1,9 +1,9 @@
 import argparse
-from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 import socket
 import sqlite3
+from contextlib import closing, contextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -22,9 +22,8 @@ from src.infrastructure.security.file_key_provider import FileKeyProvider
 from src.ports.session_broker import RelayOutcome
 from src.tools.provision_lab import LabProvisioningConfig, provision_lab
 
-
-PAM_PASSWORD = "CLI-PAM-PASSWORD-SECRET-MARKER"
-TARGET_PASSWORD = "CLI-TARGET-PASSWORD-SECRET-MARKER"
+PAM_PASSWORD = "CLI-PAM-PASSWORD-SECRET-MARKER"  # pragma: allowlist secret
+TARGET_PASSWORD = "CLI-TARGET-PASSWORD-SECRET-MARKER"  # pragma: allowlist secret
 NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 
 
@@ -631,7 +630,7 @@ def test_access_cli_uses_real_composition_through_final_broker_boundary(
     ]
     assert close_calls == [None]
 
-    with sqlite3.connect(runtime_dir / "audit.db") as connection:
+    with closing(sqlite3.connect(runtime_dir / "audit.db")) as connection:
         event_types = [
             row[0]
             for row in connection.execute(

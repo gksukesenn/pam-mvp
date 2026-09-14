@@ -2,7 +2,6 @@ import hashlib
 import hmac
 import json
 
-
 GENESIS_MAC = b"\x00" * 32
 
 

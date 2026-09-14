@@ -10,8 +10,7 @@ from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.user import User
 from src.ports.authentication import StoredUserAuthentication
 
-
-PASSWORD_MARKER = "PAM-LOGIN-PLAINTEXT-MARKER"
+PASSWORD_MARKER = "PAM-LOGIN-PLAINTEXT-MARKER"  # pragma: allowlist secret
 
 
 class FakeUserAuthenticationRepository:
@@ -64,7 +63,7 @@ def make_stored_authentication(
             username="goksu",
             is_active=is_active,
         ),
-        password_hash="encoded-user-hash",
+        password_hash="encoded-user-hash",  # pragma: allowlist secret
     )
 
 

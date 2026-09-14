@@ -1,8 +1,8 @@
+import sqlite3
 from collections.abc import Iterable
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-import sqlite3
 
 from src.domain.audit import AuditEvent, AuditEventType
 from src.infrastructure.audit.errors import (
@@ -22,7 +22,6 @@ from src.infrastructure.sqlite_security import (
     ensure_owner_only_database_file,
 )
 from src.ports.security import KeyProvider
-
 
 SCHEMA_VERSION = 2
 MAC_SIZE = 32

@@ -1,7 +1,7 @@
+import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-import sqlite3
 
 import pytest
 
@@ -249,7 +249,7 @@ def test_sql_like_ids_are_treated_only_as_values(tmp_path: Path):
             AccessAction.OPEN_PRIVILEGED_SESSION,
         )
     ) == []
-    assert len(read_rows((tmp_path / "config.db"))) == 2
+    assert len(read_rows(tmp_path / "config.db")) == 2
 
 
 @pytest.mark.parametrize(

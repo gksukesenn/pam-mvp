@@ -1,9 +1,10 @@
 import base64
-from datetime import UTC, datetime
-from pathlib import Path
 import secrets
 import sqlite3
 import stat
+from contextlib import closing
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -16,15 +17,16 @@ from src.tools.prepare_negative_lab import (
     BAD_HOST_KEY_FINGERPRINT,
     NegativeLabConfig,
     NegativeLabPreparationError,
-    main as prepare_main,
     prepare_negative_lab,
+)
+from src.tools.prepare_negative_lab import (
+    main as prepare_main,
 )
 from src.tools.provision_lab import LabProvisioningConfig, provision_lab
 from src.tools.verify_audit import main as verify_main
 
-
-PAM_PASSWORD = "NEGATIVE-LAB-PAM-PASSWORD-MARKER"
-TARGET_PASSWORD = "NEGATIVE-LAB-TARGET-PASSWORD-MARKER"
+PAM_PASSWORD = "NEGATIVE-LAB-PAM-PASSWORD-MARKER"  # pragma: allowlist secret
+TARGET_PASSWORD = "NEGATIVE-LAB-TARGET-PASSWORD-MARKER"  # pragma: allowlist secret
 AUDIT_EVENT_MARKER = "NEGATIVE-LAB-AUDIT-EVENT-MARKER"
 
 
@@ -55,7 +57,7 @@ def make_baseline(tmp_path: Path) -> Path:
 
 
 def read_config(database_path: Path) -> dict[str, tuple[object, ...]]:
-    with sqlite3.connect(database_path) as connection:
+    with closing(sqlite3.connect(database_path)) as connection:
         return {
             "policy": connection.execute(
                 """

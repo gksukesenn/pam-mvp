@@ -3,17 +3,16 @@ from datetime import timedelta
 
 import pytest
 
+import src.infrastructure.ssh.paramiko_session_broker as broker_module
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.target import HostKeyFingerprint, Target
 from src.infrastructure.ssh.errors import SshChannelError
-import src.infrastructure.ssh.paramiko_session_broker as broker_module
 from src.infrastructure.ssh.paramiko_session_broker import (
     ParamikoBrokeredSession,
     ParamikoSessionBroker,
 )
 from src.ports.session_broker import BrokerCredential, RelayOutcome
 from tests.fakes.access_dependencies import FakeTerminalIO
-
 
 CREDENTIAL_BYTES = b"temporary-broker-test-credential"
 

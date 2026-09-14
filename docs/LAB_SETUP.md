@@ -216,14 +216,15 @@ git clone <repository-url>
 cd pam-mvp
 python3 -m venv .venv
 . .venv/bin/activate
+python -m pip install --upgrade pip==26.2.1
 python -m pip install -r requirements.txt
 ```
 
-The implementation targets Python 3.11 or newer. The runtime dependency file
-contains the pinned crypto, SSH, and Argon2 libraries. The automated test
-runner is a development dependency and must be available separately to run
-the test suite; dependency packaging is a remaining publication-hardening
-item.
+The supported range is Python 3.11 through 3.14 (`>=3.11,<3.15`). The
+interactive CLI is Linux/POSIX-oriented. `requirements.txt` installs the
+project in editable mode and obtains the exact runtime dependency pins from
+`pyproject.toml`. Contributors can install the separate pinned test and
+quality-tool set with `python -m pip install -r requirements-dev.txt`.
 
 ## 9. Provision the local runtime
 

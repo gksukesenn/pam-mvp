@@ -16,8 +16,7 @@ from src.domain.user import User
 from src.ports.authentication import StoredUserAuthentication
 from tests.unit.test_access_service import make_harness
 
-
-PASSWORD = "focused-flow-password"
+PASSWORD = "focused-flow-password"  # pragma: allowlist secret
 
 
 class FlowUserAuthenticationRepository:
@@ -29,7 +28,7 @@ class FlowUserAuthenticationRepository:
             return None
         return StoredUserAuthentication(
             user=User(id="user-001", username="goksu"),
-            password_hash="encoded-flow-hash",
+            password_hash="encoded-flow-hash",  # pragma: allowlist secret
         )
 
 

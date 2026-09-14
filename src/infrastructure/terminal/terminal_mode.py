@@ -1,7 +1,7 @@
-from collections.abc import Iterator
-from contextlib import contextmanager
 import termios
 import tty
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 
 @contextmanager

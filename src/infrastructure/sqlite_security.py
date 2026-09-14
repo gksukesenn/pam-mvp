@@ -1,9 +1,8 @@
 """Filesystem protection shared by SQLite infrastructure adapters."""
 
 import os
-from pathlib import Path
 import stat
-
+from pathlib import Path
 
 DATABASE_FILE_MODE = 0o600
 

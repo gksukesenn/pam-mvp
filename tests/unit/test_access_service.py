@@ -25,13 +25,12 @@ from tests.fakes.access_dependencies import (
     FakeIdGenerator,
     FakePrivilegedAccountRepository,
     FakeSessionBroker,
-    FakeTerminalIO,
     FakeTargetRepository,
+    FakeTerminalIO,
     FakeVault,
     FixedClock,
 )
 from tests.fakes.policy_repository import FakePolicyRepository
-
 
 INTERNAL_CREDENTIAL_BYTES = b"vault-internal-password"
 INTERNAL_CREDENTIAL = BrokerCredential(INTERNAL_CREDENTIAL_BYTES)

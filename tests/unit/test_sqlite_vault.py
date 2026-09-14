@@ -1,8 +1,8 @@
+import secrets
+import sqlite3
 from contextlib import closing
 from dataclasses import fields
 from pathlib import Path
-import secrets
-import sqlite3
 
 import pytest
 
@@ -16,7 +16,6 @@ from src.infrastructure.vault.errors import (
 from src.infrastructure.vault.sqlite_vault import SCHEMA_VERSION, SQLiteVault
 from src.ports.access_dependencies import VaultPort
 from src.ports.session_broker import BrokerCredential
-
 
 PLAINTEXT_MARKER = b"PAM-PHASE-5B-PLAINTEXT-CREDENTIAL-DO-NOT-PERSIST"
 

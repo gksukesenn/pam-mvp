@@ -1,6 +1,6 @@
+import sqlite3
 from contextlib import closing
 from pathlib import Path
-import sqlite3
 
 from src.domain.user import User
 from src.infrastructure.auth.errors import (
@@ -15,7 +15,6 @@ from src.infrastructure.sqlite_security import (
     ensure_owner_only_database_file,
 )
 from src.ports.authentication import PasswordHasher, StoredUserAuthentication
-
 
 SCHEMA_VERSION = 1
 SCHEMA_DEFINITION = (

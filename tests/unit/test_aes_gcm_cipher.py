@@ -1,5 +1,5 @@
-from dataclasses import FrozenInstanceError, fields, replace
 import secrets
+from dataclasses import FrozenInstanceError, fields, replace
 
 import pytest
 

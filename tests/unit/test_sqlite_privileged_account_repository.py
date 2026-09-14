@@ -1,6 +1,6 @@
+import sqlite3
 from contextlib import closing
 from pathlib import Path
-import sqlite3
 
 import pytest
 
@@ -15,7 +15,6 @@ from src.infrastructure.config.sqlite_privileged_account_repository import (
     SQLitePrivilegedAccountRepository,
 )
 from src.ports.access_dependencies import PrivilegedAccountRepository
-
 
 PLAINTEXT_CREDENTIAL_MARKER = b"CONFIG-DB-MUST-NOT-CONTAIN-PASSWORD"
 

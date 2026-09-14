@@ -1,20 +1,19 @@
+import sqlite3
 from contextlib import closing
 from pathlib import Path
-import sqlite3
 
 from src.domain.privileged_account import CredentialRef
+from src.infrastructure.sqlite_security import (
+    DatabasePermissionError,
+    ensure_owner_only_database_file,
+)
 from src.infrastructure.vault.errors import (
     DuplicateCredentialError,
     UnsupportedVaultSchemaError,
     VaultError,
 )
-from src.infrastructure.sqlite_security import (
-    DatabasePermissionError,
-    ensure_owner_only_database_file,
-)
 from src.ports.security import EncryptedSecret, SecretCipher
 from src.ports.session_broker import BrokerCredential
-
 
 SCHEMA_VERSION = 1
 SCHEMA_DEFINITION = (

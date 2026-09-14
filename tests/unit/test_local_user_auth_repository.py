@@ -1,6 +1,6 @@
+import sqlite3
 from contextlib import closing
 from pathlib import Path
-import sqlite3
 
 import pytest
 
@@ -23,8 +23,7 @@ from src.ports.authentication import (
     UserAuthenticationRepository,
 )
 
-
-PASSWORD_MARKER = "PAM-LOGIN-PLAINTEXT-MARKER"
+PASSWORD_MARKER = "PAM-LOGIN-PLAINTEXT-MARKER"  # pragma: allowlist secret
 
 
 def make_repository(

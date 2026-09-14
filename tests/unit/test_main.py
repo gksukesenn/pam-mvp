@@ -6,8 +6,7 @@ import pytest
 import src.main as main_module
 from src.bootstrap import RuntimeSettings
 
-
-SECRET_MARKER = "VALIDATE-SECRET-MARKER"
+SECRET_MARKER = "VALIDATE-SECRET-MARKER"  # pragma: allowlist secret
 
 
 def validation_arguments(tmp_path: Path) -> list[str]:

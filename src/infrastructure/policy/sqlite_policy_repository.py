@@ -1,7 +1,7 @@
+import sqlite3
 from collections.abc import Collection
 from contextlib import closing
 from pathlib import Path
-import sqlite3
 
 from src.domain.access import AccessAction, AccessEffect, AccessPolicy
 from src.infrastructure.policy.errors import (
@@ -13,7 +13,6 @@ from src.infrastructure.sqlite_security import (
     DatabasePermissionError,
     ensure_owner_only_database_file,
 )
-
 
 SCHEMA_COLUMNS = (
     "id",

@@ -1,9 +1,9 @@
-from dataclasses import FrozenInstanceError, fields
-from datetime import timedelta
-from pathlib import Path
 import secrets
 import socket
 import stat
+from dataclasses import FrozenInstanceError, fields
+from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -39,7 +39,6 @@ from src.infrastructure.ssh.paramiko_session_broker import ParamikoSessionBroker
 from src.infrastructure.terminal.local_terminal_io import LocalTerminalIO
 from src.infrastructure.vault.errors import VaultError
 from src.infrastructure.vault.sqlite_vault import SQLiteVault
-
 
 PLAINTEXT_MARKER = b"COMPOSITION-MUST-NOT-NEED-A-PLAINTEXT-CREDENTIAL"
 

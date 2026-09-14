@@ -1,7 +1,7 @@
+import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import sqlite3
 
 import pytest
 
@@ -16,15 +16,15 @@ from src.domain.access import (
 from src.domain.authentication import AuthenticatedPrincipal
 from src.domain.privileged_account import CredentialRef, PrivilegedAccount
 from src.domain.target import HostKeyFingerprint, Target
+from src.infrastructure.config.errors import (
+    AmbiguousPrivilegedAccountError,
+    ConfigStorageError,
+)
 from src.infrastructure.config.sqlite_privileged_account_repository import (
     SQLitePrivilegedAccountRepository,
 )
 from src.infrastructure.config.sqlite_target_repository import (
     SQLiteTargetRepository,
-)
-from src.infrastructure.config.errors import (
-    AmbiguousPrivilegedAccountError,
-    ConfigStorageError,
 )
 from src.infrastructure.policy.sqlite_policy_repository import (
     SQLitePolicyRepository,
@@ -39,7 +39,6 @@ from tests.fakes.access_dependencies import (
     FakeVault,
     FixedClock,
 )
-
 
 SECRET_MARKERS = (
     b"TARGET-PLAINTEXT-PASSWORD-MARKER",

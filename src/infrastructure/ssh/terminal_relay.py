@@ -1,6 +1,6 @@
+import select
 from collections.abc import Callable
 from datetime import timedelta
-import select
 from time import monotonic as system_monotonic
 
 from src.infrastructure.ssh.errors import SshChannelError

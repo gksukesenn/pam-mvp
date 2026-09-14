@@ -1,3 +1,5 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from src.domain.access import AccessAction, AccessDecision, AccessEffect
@@ -36,5 +38,5 @@ def test_access_decision_is_immutable():
         reason="policy-001",
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         decision.effect = AccessEffect.DENY

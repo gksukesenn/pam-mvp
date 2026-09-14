@@ -12,7 +12,6 @@ from src.infrastructure.ssh.errors import (
 from src.infrastructure.ssh.host_key import verify_pinned_host_key
 from src.ports.session_broker import BrokerCredential
 
-
 # Paramiko 5.0.0 already advertises only SHA-2/Curve25519/ECDH key exchange
 # and omits the SHA-1 ssh-rsa host-key algorithm. Keep ssh-rsa explicitly
 # disabled so it cannot be enabled through this adapter's Transport settings.
