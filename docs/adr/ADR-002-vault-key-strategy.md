@@ -52,7 +52,19 @@ runtime/lab/
 The directory is `0700` and each key/database file is `0600`. The Vault key is
 not in `vault.db`; the audit key is not in `audit.db`; key bytes are not
 persisted in any database. Composition rejects equal canonical key paths and
-equal key bytes.
+equal key bytes. `FileKeyProvider` opens key leaf paths with `O_NOFOLLOW`,
+validates the opened descriptor is a regular file, accepts only owner-only
+permission modes, and reads exactly from that descriptor. Provisioning and
+the lab access command reject a symbolic-link runtime-directory leaf; access
+also requires the provisioned `0700` directory mode. SQLite leaf paths retain
+the equivalent no-follow/regular-file protection.
+
+`vault.db` schema version 1 validates the exact credential table shape,
+primary key, and required `NOT NULL` constraints before use. An exact legacy
+version-0 schema is recognized by shape and upgraded only by setting
+`PRAGMA user_version = 1`; credential rows are not migrated or rewritten.
+Unsupported versions, incompatible schemas, and malformed row types fail
+closed.
 
 For the local MVP, this co-located owner-only directory **supersedes the
 historical rejection of a shared storage location as a deployment
@@ -64,6 +76,9 @@ the PAM OS account, process, root, or host.
 A KMS/HSM, secret service, or otherwise independently protected key location
 remains deployment hardening for a broader product. The implementation's
 `KeyProvider` boundary intentionally permits that evolution.
+
+This is local leaf-path hardening, not a filesystem sandbox. Ancestor-path,
+mount, PAM-account, and root control remain inside the trusted-host boundary.
 
 ## Consequences
 

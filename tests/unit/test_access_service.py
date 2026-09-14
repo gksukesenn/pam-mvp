@@ -39,6 +39,16 @@ MAX_SESSION_DURATION = timedelta(minutes=30)
 PRINCIPAL = AuthenticatedPrincipal(user_id="user-001", username="goksu")
 
 
+class SequenceClock:
+    def __init__(self, values: list[datetime]) -> None:
+        self._values = iter(values)
+        self.calls = 0
+
+    def now(self) -> datetime:
+        self.calls += 1
+        return next(self._values)
+
+
 @dataclass
 class Harness:
     service: AccessService
@@ -209,6 +219,66 @@ def test_allowed_access_relays_and_closes_session_normally():
     assert harness.call_log.index("audit.append:session_active") < (
         harness.call_log.index("brokered_session.relay")
     )
+
+
+def test_wall_clock_rollback_still_closes_and_audits_session_once():
+    harness = make_harness([make_policy(AccessEffect.ALLOW)])
+    started_at = datetime(2026, 9, 12, 10, 5, tzinfo=UTC)
+    rolled_back = started_at - timedelta(minutes=10)
+    clock = SequenceClock([started_at] * 4 + [rolled_back])
+    harness.service._clock = clock
+
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.CLOSED
+    assert result.session.ended_at == started_at
+    assert result.session.ended_at >= result.session.started_at
+    assert harness.brokered_session.close_calls == 1
+    terminal_events = [
+        event
+        for event in harness.audit_repository.events
+        if event.event_type
+        in {AuditEventType.SESSION_CLOSED, AuditEventType.SESSION_FAILED}
+    ]
+    assert [event.event_type for event in terminal_events] == [
+        AuditEventType.SESSION_CLOSED
+    ]
+    assert terminal_events[0].timestamp == started_at
+
+
+def test_wall_clock_rollback_still_fails_and_audits_relay_error_once():
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        relay_error=RuntimeError("controlled relay failure"),
+    )
+    started_at = datetime(2026, 9, 12, 10, 5, tzinfo=UTC)
+    rolled_back = started_at - timedelta(minutes=10)
+    clock = SequenceClock([started_at] * 4 + [rolled_back])
+    harness.service._clock = clock
+
+    result = harness.service.handle(
+        PRINCIPAL, make_request(), harness.terminal_io
+    )
+
+    assert result.session is not None
+    assert result.session.status is SessionStatus.FAILED
+    assert result.session.close_reason == "relay_failed"
+    assert result.session.ended_at == started_at
+    assert result.session.ended_at >= result.session.started_at
+    assert harness.brokered_session.close_calls == 1
+    terminal_events = [
+        event
+        for event in harness.audit_repository.events
+        if event.event_type
+        in {AuditEventType.SESSION_CLOSED, AuditEventType.SESSION_FAILED}
+    ]
+    assert [event.event_type for event in terminal_events] == [
+        AuditEventType.SESSION_FAILED
+    ]
+    assert terminal_events[0].timestamp == started_at
 
 
 def test_positive_max_session_duration_is_accepted_and_forwarded():

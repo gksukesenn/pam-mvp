@@ -13,6 +13,25 @@ from src.infrastructure.ssh.host_key import verify_pinned_host_key
 from src.ports.session_broker import BrokerCredential
 
 
+# Paramiko 5.0.0 already advertises only SHA-2/Curve25519/ECDH key exchange
+# and omits the SHA-1 ssh-rsa host-key algorithm. Keep ssh-rsa explicitly
+# disabled so it cannot be enabled through this adapter's Transport settings.
+# The remaining entries remove every legacy cipher/MAC still present in the
+# pinned Paramiko release while preserving CTR/GCM, SHA-2 MACs, and Ed25519.
+SSH_DISABLED_ALGORITHMS = (
+    (
+        "ciphers",
+        ("aes128-cbc", "aes192-cbc", "aes256-cbc", "3des-cbc"),
+    ),
+    (
+        "macs",
+        ("hmac-sha1", "hmac-sha1-96", "hmac-md5", "hmac-md5-96"),
+    ),
+    ("keys", ("ssh-rsa",)),
+    ("pubkeys", ("ssh-rsa",)),
+)
+
+
 class VerifiedSshConnection:
     __slots__ = ("_transport", "_socket", "_closed")
 
@@ -78,7 +97,10 @@ class ParamikoSshConnector:
             ) from error
 
         try:
-            transport = paramiko.Transport(connection_socket)
+            transport = paramiko.Transport(
+                connection_socket,
+                disabled_algorithms=dict(SSH_DISABLED_ALGORITHMS),
+            )
             transport.start_client(timeout=self._connect_timeout)
             server_key = transport.get_remote_server_key()
         except Exception as error:

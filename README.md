@@ -51,7 +51,9 @@ and tests support these claims:
   explicit `DENY` fail closed; `DENY` takes precedence over `ALLOW`.
 - Disabled targets and privileged accounts stop before Vault or broker use.
 - The configured SSH host key is compared before target-password
-  authentication. There is no trust-on-first-use path.
+  authentication. There is no trust-on-first-use path, and the Paramiko
+  adapter disables its legacy CBC/3DES ciphers, SHA-1/MD5 MACs, and
+  `ssh-rsa`/SHA-1 host/public-key signature algorithm.
 - Session state transitions are constrained, broker/channel cleanup is
   attempted on every path, and local terminal restoration is protected by a
   context manager.
@@ -59,7 +61,9 @@ and tests support these claims:
   monotonic clock; activity does not reset it.
 - Access and session lifecycle events are stored in an append-only application
   interface and linked with HMAC-SHA256 for tamper evidence.
-- Provisioned runtime directories are `0700`; key and SQLite files are `0600`.
+- Provisioned/access runtime directories are required to be `0700`; key and
+  SQLite files are `0600`. Key and DB leaf paths reject symbolic links and
+  non-regular files.
 
 The precise guarantee for the current lab is that **database-only theft or
 accidental disclosure of `vault.db` does not reveal the target credential

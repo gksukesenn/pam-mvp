@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 import getpass
 from pathlib import Path
+import stat
 import sys
 
 from src.application.access_service import AccessResult
@@ -213,10 +214,15 @@ def _runtime_is_provisioned(runtime_dir: Path) -> bool:
         "vault.db",
     )
     try:
-        return runtime_dir.is_dir() and all(
-            (runtime_dir / filename).is_file()
-            and (runtime_dir / filename).stat().st_size > 0
-            for filename in required_files
+        runtime_stat = runtime_dir.stat(follow_symlinks=False)
+        return (
+            stat.S_ISDIR(runtime_stat.st_mode)
+            and stat.S_IMODE(runtime_stat.st_mode) == 0o700
+            and all(
+                (runtime_dir / filename).is_file()
+                and (runtime_dir / filename).stat().st_size > 0
+                for filename in required_files
+            )
         )
     except OSError:
         return False

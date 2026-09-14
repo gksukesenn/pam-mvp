@@ -16,6 +16,14 @@ Network/live-VM activity: none
 > below is preserved as the evidence and prioritization recorded at audit
 > time; it is not a claim that those two publication blockers remain open.
 
+> Phase 10B-2 resolution: S-003 through S-007 were subsequently resolved by
+> clamped terminal lifecycle timestamps under backward wall-clock movement,
+> an explicit Paramiko legacy-algorithm deny policy, redacted
+> `EncryptedSecret` representation, versioned/exact Vault schema and row
+> validation with compatible legacy metadata upgrade, and descriptor-based
+> no-follow regular-file key loading plus strict lab runtime-directory checks.
+> The original findings below remain unchanged as point-in-time audit evidence.
+
 # Executive Summary
 
 The core functional MVP is complete and its supported access path is credible. The implementation authenticates a local PAM user, binds authorization to the authenticated principal, evaluates policy fail-closed, resolves an encrypted target credential only after authorization and configuration checks, verifies the pinned SSH host key before password authentication, brokers an interactive PTY under a monotonic duration limit, restores terminal state, and appends HMAC-chained audit events. The supplied record of successful and negative live validation is consistent with the code and automated tests.

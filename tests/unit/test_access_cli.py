@@ -122,7 +122,8 @@ def allow_result(
 
 def prepare_runtime(tmp_path: Path) -> Path:
     runtime_dir = tmp_path / "runtime" / "lab"
-    runtime_dir.mkdir(parents=True)
+    runtime_dir.mkdir(parents=True, mode=0o700)
+    runtime_dir.chmod(0o700)
     for filename in (
         "vault.key",
         "audit.key",
@@ -132,6 +133,63 @@ def prepare_runtime(tmp_path: Path) -> Path:
     ):
         (runtime_dir / filename).write_bytes(b"test-placeholder")
     return runtime_dir
+
+
+def test_access_rejects_symlinked_runtime_before_composition_or_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    actual_runtime = prepare_runtime(tmp_path)
+    linked_runtime = tmp_path / "linked-runtime"
+    linked_runtime.symlink_to(actual_runtime, target_is_directory=True)
+    monkeypatch.setattr(
+        main_module,
+        "build_application",
+        lambda settings: pytest.fail("must not build from symlinked runtime"),
+    )
+    monkeypatch.setattr(
+        main_module.getpass,
+        "getpass",
+        lambda prompt: pytest.fail("must not prompt for symlinked runtime"),
+    )
+
+    result = main_module.main(access_arguments(linked_runtime))
+
+    captured = capsys.readouterr()
+    assert result == main_module.EXIT_INTERNAL_FAILURE
+    assert captured.out == (
+        "Runtime is not provisioned. Run the lab provisioning tool first.\n"
+    )
+    assert captured.err == ""
+
+
+def test_access_rejects_runtime_with_group_permissions_before_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    runtime_dir = prepare_runtime(tmp_path)
+    runtime_dir.chmod(0o750)
+    monkeypatch.setattr(
+        main_module,
+        "build_application",
+        lambda settings: pytest.fail("must not build from unsafe runtime"),
+    )
+    monkeypatch.setattr(
+        main_module.getpass,
+        "getpass",
+        lambda prompt: pytest.fail("must not prompt for unsafe runtime"),
+    )
+
+    result = main_module.main(access_arguments(runtime_dir))
+
+    captured = capsys.readouterr()
+    assert result == main_module.EXIT_INTERNAL_FAILURE
+    assert captured.out == (
+        "Runtime is not provisioned. Run the lab provisioning tool first.\n"
+    )
+    assert captured.err == ""
 
 
 def access_arguments(runtime_dir: Path) -> list[str]:

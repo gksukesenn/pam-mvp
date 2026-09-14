@@ -89,6 +89,13 @@ time. User activity does not extend it. Local raw-terminal changes live in an
 outer context manager so normal logout, remote EOF, timeout, denial, relay
 failure, and exceptions restore terminal attributes.
 
+Session retains the invariant `ended_at >= started_at`. If the host UTC clock
+moves behind `started_at`, `AccessService` clamps the terminal lifecycle
+timestamp to `started_at` for both the terminal state and terminal audit event.
+This deliberately preserves a valid terminal record; it does not claim that
+the clamped value is a precise observation of wall-clock time. Duration
+enforcement remains independent and monotonic.
+
 ### Audit lifecycle
 
 The current production vocabulary is exactly:

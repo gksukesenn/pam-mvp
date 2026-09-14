@@ -18,6 +18,10 @@ decision references T04, T06, and deferred host compromise D01.
 - Configure the target IP/port, account reference, and independently verified
   ED25519 SHA256 host fingerprint in the PAM runtime.
 - Reject a host-key mismatch before target password authentication.
+- Apply a Paramiko 5.0.0 policy that disables CBC/3DES ciphers,
+  SHA-1/MD5 MACs, and `ssh-rsa` for host/public-key signatures. The remaining
+  enabled policy uses AES CTR/GCM, SHA-2 MACs, Ed25519/ECDSA/RSA-SHA2 host
+  keys, and Paramiko's SHA-2/Curve25519/ECDH key exchanges.
 - Keep VM creation/control, libvirt, snapshots, and network configuration out
   of the application/domain.
 - Support manual installation; infrastructure-as-code is not required for the
@@ -38,6 +42,10 @@ production audit contract records broker-open failures generically as
 `SESSION_FAILED`/`broker_open_failed`. That event-scope difference is recorded
 in [ADR-004](ADR-004-audit-integrity.md); it is not hidden or represented as
 already implemented.
+
+If a server and client share no enabled algorithm, Paramiko negotiation fails
+through the existing secret-free SSH connection error and closes the transport
+and socket. There is no permissive retry or fallback policy.
 
 ## Consequences
 

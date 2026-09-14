@@ -19,6 +19,7 @@ from src.infrastructure.ssh.host_key import calculate_sha256_fingerprint
 import src.infrastructure.ssh.paramiko_connection as connection_module
 from src.infrastructure.ssh.paramiko_connection import (
     ParamikoSshConnector,
+    SSH_DISABLED_ALGORITHMS,
     VerifiedSshConnection,
 )
 from src.ports.session_broker import BrokerCredential
@@ -53,6 +54,7 @@ class FakeTransport:
         self.auth_calls = 0
         self.received_expected_password = False
         self.close_calls = 0
+        self.disabled_algorithms: dict[str, tuple[str, ...]] | None = None
 
     def start_client(self, timeout: float) -> None:
         self.events.append("start_client")
@@ -112,9 +114,14 @@ def install_fakes(
         events.append("tcp_connect")
         return fake_socket
 
-    def create_transport(connection_socket: FakeSocket) -> FakeTransport:
+    def create_transport(
+        connection_socket: FakeSocket,
+        *,
+        disabled_algorithms: dict[str, tuple[str, ...]],
+    ) -> FakeTransport:
         events.append("transport_create")
         assert connection_socket is fake_socket
+        fake_transport.disabled_algorithms = disabled_algorithms
         return fake_transport
 
     monkeypatch.setattr(
@@ -145,6 +152,7 @@ def test_matching_host_key_authenticates_and_returns_verified_connection(
     )
 
     assert isinstance(connection, VerifiedSshConnection)
+    assert fake_transport.disabled_algorithms == dict(SSH_DISABLED_ALGORITHMS)
     assert fake_transport.auth_calls == 1
     assert fake_transport.received_expected_password is True
     assert events == [
@@ -154,6 +162,57 @@ def test_matching_host_key_authenticates_and_returns_verified_connection(
         "get_remote_server_key",
         "auth_password",
     ]
+
+
+def test_algorithm_policy_leaves_only_expected_paramiko_5_algorithms():
+    disabled = dict(SSH_DISABLED_ALGORITHMS)
+
+    effective_ciphers = tuple(
+        name
+        for name in paramiko.Transport._preferred_ciphers
+        if name not in disabled["ciphers"]
+    )
+    effective_macs = tuple(
+        name
+        for name in paramiko.Transport._preferred_macs
+        if name not in disabled["macs"]
+    )
+    effective_keys = tuple(
+        name
+        for name in paramiko.Transport._preferred_keys
+        if name not in disabled["keys"]
+    )
+
+    assert effective_ciphers == (
+        "aes128-ctr",
+        "aes192-ctr",
+        "aes256-ctr",
+        "aes128-gcm@openssh.com",
+        "aes256-gcm@openssh.com",
+    )
+    assert effective_macs == (
+        "hmac-sha2-256",
+        "hmac-sha2-512",
+        "hmac-sha2-256-etm@openssh.com",
+        "hmac-sha2-512-etm@openssh.com",
+    )
+    assert effective_keys == (
+        "ssh-ed25519",
+        "ecdsa-sha2-nistp256",
+        "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp521",
+        "rsa-sha2-512",
+        "rsa-sha2-256",
+    )
+    assert paramiko.Transport._preferred_kex == (
+        "curve25519-sha256@libssh.org",
+        "ecdh-sha2-nistp256",
+        "ecdh-sha2-nistp384",
+        "ecdh-sha2-nistp521",
+        "diffie-hellman-group16-sha512",
+        "diffie-hellman-group-exchange-sha256",
+        "diffie-hellman-group14-sha256",
+    )
 
 
 def test_host_key_mismatch_happens_before_authentication_and_closes_resources(
@@ -276,13 +335,18 @@ def test_negotiation_failure_closes_transport_and_socket(
     with pytest.raises(
         SshConnectionError,
         match="SSH negotiation failed for target target-001",
-    ):
+    ) as captured:
         ParamikoSshConnector().connect(
             make_target(server_key),
             make_account(),
             BrokerCredential(CREDENTIAL_BYTES),
         )
 
+    assert fake_transport.disabled_algorithms == dict(SSH_DISABLED_ALGORITHMS)
+    assert fake_transport.auth_calls == 0
+    assert "auth_password" not in events
+    assert "controlled negotiation failure" not in str(captured.value)
+    assert CREDENTIAL_BYTES.decode() not in str(captured.value)
     assert fake_transport.close_calls == 1
     assert fake_socket.close_calls == 1
 

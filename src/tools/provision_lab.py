@@ -333,16 +333,33 @@ def _parse_openssh_sha256_fingerprint(value: str) -> HostKeyFingerprint:
 def _ensure_private_runtime_directory(runtime_dir: Path) -> None:
     if not isinstance(runtime_dir, Path):
         raise LabProvisioningError("runtime directory path is invalid")
+    descriptor: int | None = None
     try:
+        if runtime_dir.is_symlink():
+            raise LabProvisioningError(
+                "runtime directory must not be a symbolic link"
+            )
         existed = runtime_dir.exists()
         runtime_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+        descriptor = os.open(
+            runtime_dir,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY,
+        )
         if not existed:
-            runtime_dir.chmod(0o700)
-        file_stat = runtime_dir.stat()
+            os.fchmod(descriptor, 0o700)
+        file_stat = os.fstat(descriptor)
+    except LabProvisioningError:
+        raise
     except OSError:
         raise LabProvisioningError(
             "runtime directory could not be created or inspected"
         ) from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
     if not stat.S_ISDIR(file_stat.st_mode):
         raise LabProvisioningError("runtime path is not a directory")
     if stat.S_IMODE(file_stat.st_mode) != 0o700:

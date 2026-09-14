@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from src.application.policy_evaluator import PolicyEvaluator
 from src.domain.access import AccessDecision, AccessEffect, AccessRequest
@@ -27,7 +27,9 @@ class AccessService:
     """Orchestrate privileged access with a total elapsed-duration cap.
 
     The configured maximum applies regardless of terminal activity. It is not
-    an idle timeout.
+    an idle timeout. If the wall clock moves behind a session's start time,
+    terminal timestamps are clamped to that start time so the strict Session
+    invariant cannot strand a brokered session in a nonterminal state.
     """
 
     def __init__(
@@ -125,7 +127,7 @@ class AccessService:
             )
         except Exception:
             session.mark_failed(
-                ended_at=self._clock.now(),
+                ended_at=self._terminal_timestamp(session),
                 reason="audit_persistence_failed",
             )
             raise
@@ -154,7 +156,7 @@ class AccessService:
                 )
             except Exception:
                 session.mark_failed(
-                    ended_at=self._clock.now(),
+                    ended_at=self._terminal_timestamp(session),
                     reason="audit_persistence_failed",
                 )
                 raise
@@ -184,8 +186,9 @@ class AccessService:
                 if relay_outcome is RelayOutcome.MAX_DURATION_EXCEEDED
                 else "relay_completed"
             )
+            ended_at = self._terminal_timestamp(session)
             session.mark_closed(
-                ended_at=self._clock.now(),
+                ended_at=ended_at,
                 reason=close_reason,
             )
             self._append_event(
@@ -194,6 +197,7 @@ class AccessService:
                 session_id=session.id,
                 result="closed",
                 reason_code=close_reason,
+                timestamp=ended_at,
             )
 
         return AccessResult(decision=decision, session=session)
@@ -204,8 +208,9 @@ class AccessService:
         session: Session,
         reason: str,
     ) -> None:
+        ended_at = self._terminal_timestamp(session)
         session.mark_failed(
-            ended_at=self._clock.now(),
+            ended_at=ended_at,
             reason=reason,
         )
         self._append_event(
@@ -214,7 +219,12 @@ class AccessService:
             session_id=session.id,
             result="failed",
             reason_code=reason,
+            timestamp=ended_at,
         )
+
+    def _terminal_timestamp(self, session: Session) -> datetime:
+        observed = self._clock.now()
+        return max(observed, session.started_at)
 
     def _deny_with_reason(
         self,
@@ -250,11 +260,14 @@ class AccessService:
         result: str,
         reason_code: str | None = None,
         actor_user_id: str | None = None,
+        timestamp: datetime | None = None,
     ) -> None:
         self._audit_repository.append(
             AuditEvent(
                 id=self._id_generator.new_id(),
-                timestamp=self._clock.now(),
+                timestamp=(
+                    self._clock.now() if timestamp is None else timestamp
+                ),
                 event_type=event_type,
                 actor_user_id=(
                     request.user_id

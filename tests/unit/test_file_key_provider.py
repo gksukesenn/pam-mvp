@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import secrets
 
@@ -51,6 +52,45 @@ def test_wrong_length_key_fails_closed(tmp_path: Path):
         match="master key must be exactly 32 bytes",
     ):
         FileKeyProvider(key_file).get_key()
+
+
+def test_symlink_to_valid_key_is_rejected(tmp_path: Path):
+    key = secrets.token_bytes(32)
+    real_key_file = tmp_path / "real.key"
+    linked_key_file = tmp_path / "linked.key"
+    write_key_file(real_key_file, key, 0o600)
+    linked_key_file.symlink_to(real_key_file)
+
+    with pytest.raises(
+        KeyProviderError,
+        match="master key path must identify a regular file",
+    ) as captured:
+        FileKeyProvider(linked_key_file).get_key()
+
+    assert key.hex() not in str(captured.value)
+    assert repr(key) not in repr(captured.value)
+
+
+def test_directory_at_key_path_is_rejected(tmp_path: Path):
+    key_directory = tmp_path / "master.key"
+    key_directory.mkdir(mode=0o700)
+
+    with pytest.raises(
+        KeyProviderError,
+        match="master key path must identify a regular file",
+    ):
+        FileKeyProvider(key_directory).get_key()
+
+
+def test_fifo_at_key_path_is_rejected_without_blocking(tmp_path: Path):
+    key_fifo = tmp_path / "master.key"
+    os.mkfifo(key_fifo, mode=0o600)
+
+    with pytest.raises(
+        KeyProviderError,
+        match="master key path must identify a regular file",
+    ):
+        FileKeyProvider(key_fifo).get_key()
 
 
 @pytest.mark.parametrize(

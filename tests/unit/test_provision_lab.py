@@ -235,6 +235,26 @@ def test_existing_valid_keys_are_preserved(tmp_path: Path):
     assert (runtime_dir / "audit.key").read_bytes() == audit_key
 
 
+def test_symlinked_runtime_directory_is_rejected_before_prompt(
+    tmp_path: Path,
+):
+    actual_runtime = tmp_path / "actual-runtime"
+    actual_runtime.mkdir(mode=0o700)
+    linked_runtime = tmp_path / "linked-runtime"
+    linked_runtime.symlink_to(actual_runtime, target_is_directory=True)
+
+    with pytest.raises(
+        LabProvisioningError,
+        match="runtime directory must not be a symbolic link",
+    ):
+        provision_lab(
+            LabProvisioningConfig(runtime_dir=linked_runtime),
+            lambda prompt: pytest.fail("must reject before prompting"),
+        )
+
+    assert list(actual_runtime.iterdir()) == []
+
+
 def test_identical_keys_fail_without_prompt_or_secret_output(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

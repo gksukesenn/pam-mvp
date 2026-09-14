@@ -96,6 +96,29 @@ def test_encrypted_representation_exposes_no_plaintext_secret_field():
     }
 
 
+def test_encrypted_secret_repr_redacts_nonce_and_ciphertext_contents():
+    nonce_marker = b"NONCE-MARKER"
+    plaintext_marker = b"PLAINTEXT-MARKER"
+    ciphertext_marker = b"CIPHERTEXT-MARKER-" + plaintext_marker
+    encrypted = EncryptedSecret(
+        version=1,
+        nonce=nonce_marker,
+        ciphertext=ciphertext_marker,
+    )
+
+    representation = repr(encrypted)
+
+    assert representation == (
+        "EncryptedSecret(version=1, nonce=<redacted>, "
+        "ciphertext=<redacted>)"
+    )
+    assert repr(nonce_marker) not in representation
+    assert repr(ciphertext_marker) not in representation
+    assert "NONCE-MARKER" not in representation
+    assert "CIPHERTEXT-MARKER" not in representation
+    assert "PLAINTEXT-MARKER" not in representation
+
+
 def test_encrypted_representation_is_immutable():
     encrypted = AesGcmSecretCipher(make_key()).encrypt(
         b"temporary test credential"

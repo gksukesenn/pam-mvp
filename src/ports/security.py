@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class EncryptedSecret:
     version: int
     nonce: bytes
@@ -13,6 +13,12 @@ class EncryptedSecret:
             raise ValueError("nonce must be exactly 12 bytes")
         if not isinstance(self.ciphertext, bytes) or not self.ciphertext:
             raise ValueError("ciphertext cannot be empty")
+
+    def __repr__(self) -> str:
+        return (
+            f"EncryptedSecret(version={self.version!r}, "
+            "nonce=<redacted>, ciphertext=<redacted>)"
+        )
 
 
 class KeyProvider(Protocol):
