@@ -1,11 +1,136 @@
 # PAM MVP
 
-This project is a small privileged access management (PAM) reference
-implementation for brokering an interactive SSH session to a managed Linux
-target. It demonstrates how local user authentication, fail-closed
-authorization, encrypted credential retrieval, pinned server identity,
-session lifecycle control, and tamper-evident audit can be composed without
-putting the target password in the access command.
+[![CI](https://github.com/gksukesenn/pam-mvp/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/gksukesenn/pam-mvp/actions/workflows/ci.yml)
+[![Python 3.11–3.14](https://img.shields.io/badge/Python-3.11%E2%80%933.14-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Linux / POSIX](https://img.shields.io/badge/platform-Linux%20%2F%20POSIX-FCC624?logo=linux&logoColor=black)](#scope)
+
+A security-focused Privileged Access Management reference MVP that brokers an
+interactive privileged SSH session without exposing the target-account
+password to the operator.
+
+It combines fail-closed authorization, AES-256-GCM credential storage, pinned
+SSH server identity, an interactive PTY broker, bounded session lifetime,
+HMAC-chained audit, and Clean Architecture in one reviewable trust path.
+
+## Validation evidence
+
+- **381 automated tests** covering domain, adapter, composition, and security
+  boundaries
+- **86.02% measured statement-plus-branch coverage**, with an enforced 84% CI
+  floor
+- **Real Debian 13 E2E:** PAM authentication through a brokered privileged SSH
+  shell
+- **Live negative validation:** denial, disabled configuration, bad host pin,
+  wrong credentials, timeout, and audit tampering
+- **GitHub Actions:** green on Python 3.11 and 3.14
+- **Release gates:** Ruff, mypy, dependency audit, and tracked-file secret scan
+
+Test count alone is not treated as proof of security; the evidence combines
+behavioral tests, real adapters, manual boundary validation, and explicit
+limitations. See [Live Validation](docs/LIVE_VALIDATION.md) and the
+[Final Release Audit](docs/FINAL_RELEASE_AUDIT.md).
+
+## Why this project
+
+A PAM user should be able to request a privileged shell without knowing or
+typing the managed target's privileged-account password. This MVP
+authenticates the local PAM user, binds authorization to that authenticated
+identity, resolves the target credential from an encrypted Vault, verifies the
+SSH server's pinned identity, and only then uses the credential to authenticate
+and broker the interactive session.
+
+That ordering is the security argument: denial and disabled configuration stop
+before Vault or SSH access, while a wrong server key stops before target
+password authentication. `AccessService` owns that use-case sequence and emits
+only the implemented access/session lifecycle audit events.
+
+## What it demonstrates
+
+- Clean Architecture and dependency inversion across domain, ports, adapters,
+  and composition
+- Authenticated identity binding that removes caller-controlled authorization
+  identity
+- Fail-closed ordering across policy, target, account, Vault, and broker
+- Authenticated encryption for target credentials at rest
+- SSH server identity verification before target credential use
+- State-machine-based session lifecycle and deterministic terminal outcomes
+- Monotonic maximum-duration enforcement independent of wall-clock movement
+- HMAC-chained tamper-evident audit with documented assurance boundaries
+- Negative security testing backed by real SQLite/crypto adapters behind ports
+- CI across Python 3.11 and 3.14 with lint, type, coverage, dependency, and
+  tracked-file secret gates
+
+## Architecture
+
+```mermaid
+flowchart TD
+    U[PAM user] -->|PAM password via getpass| A[AuthenticationService]
+    A --> P[AuthenticatedPrincipal]
+    P --> R[Principal-bound AccessRequest]
+    R --> E[PolicyEvaluator]
+
+    E -->|ALLOW| C[Target and PrivilegedAccount checks]
+    E -->|DENY or missing policy| D[Access denied]
+    C -->|Disabled or missing| D
+    C -->|Enabled and valid| V[(Encrypted credential Vault)]
+    V --> O[Session opening]
+
+    O --> N[SSH negotiation and remote host key]
+    N --> H{Pinned host key matches?}
+    H -->|No| F[Session failed]
+    H -->|Yes| T[Target password authentication]
+    T -->|Failure| F
+    T --> B[Interactive PTY session broker]
+    B --> S[Debian SSH target]
+    B -->|Failure| F
+    B -->|Normal close or timeout| X[Session closed]
+
+    D -. ACCESS_DENIED .-> AU[(HMAC-chained audit)]
+    O -. ACCESS_ALLOWED / SESSION_OPENING .-> AU
+    B -. SESSION_ACTIVE .-> AU
+    F -. SESSION_FAILED .-> AU
+    X -. SESSION_CLOSED .-> AU
+```
+
+The CLI never accepts a caller-supplied `user_id`. After authentication it
+uses the principal's `user_id` in the access request, and `AccessService`
+rejects an identity mismatch before policy, Vault, or SSH work. Audit begins
+with access/session processing; the MVP does not claim pre-authentication audit
+events.
+
+## Live demo
+
+This sanitized transcript reflects the completed manual Debian 13 validation.
+The PAM password is entered at a non-echoing prompt; no target password prompt
+appears and no terminal transcript is stored by the application.
+
+**The target privileged-account password is retrieved from the encrypted Vault
+and is never entered by the operator during access.** It necessarily exists
+briefly in process and SSH-library memory; Python does not guarantee
+deterministic zeroization.
+
+```text
+$ python -m src.main access \
+    --runtime-dir ./runtime/lab \
+    --username goksu \
+    --target-id target-001
+
+PAM password:
+Authenticated. Requesting access to target-001...
+
+pamadmin@linux-server-1:~$ whoami
+pamadmin
+
+pamadmin@linux-server-1:~$ hostname
+linux-server-1
+
+pamadmin@linux-server-1:~$ exit
+Session closed.
+```
+
+The successful run and negative matrix are recorded in
+[Live Validation](docs/LIVE_VALIDATION.md); they are environment-specific
+manual evidence rather than CI tests.
 
 ## Scope
 
@@ -14,26 +139,6 @@ uses one local PAM user, direct user-to-target policy, one privileged account
 per target, local SQLite persistence, and a separately managed Debian SSH
 target. The lab is intentionally small enough for its security ordering to be
 reviewed end to end.
-
-## Core security flow
-
-```text
-PAM user
-  -> AuthenticationService
-  -> AuthenticatedPrincipal
-  -> principal-bound AccessRequest
-  -> PolicyEvaluator
-  -> Target and PrivilegedAccount configuration
-  -> encrypted Vault
-  -> pinned SSH host-key verification
-  -> target-password authentication
-  -> brokered interactive PTY
-  -> Session lifecycle and structured audit
-```
-
-The CLI never accepts a caller-supplied `user_id`. After authentication it
-uses the principal's `user_id` in the access request, and `AccessService`
-rejects an identity mismatch before policy, Vault, or SSH work.
 
 ## Security guarantees
 
@@ -204,6 +309,7 @@ authorization. No software license is granted by this README.
 - [Negative E2E Runbook](docs/LAB_NEGATIVE_E2E.md)
 - [Live Validation Record](docs/LIVE_VALIDATION.md)
 - [Final Gap Audit](docs/FINAL_GAP_AUDIT.md)
+- [Final Release Audit](docs/FINAL_RELEASE_AUDIT.md)
 - [ADR-002: Vault and Master Key Strategy](docs/adr/ADR-002-vault-key-strategy.md)
 - [ADR-003: Access Policy Model](docs/adr/ADR-003-access-policy.md)
 - [ADR-004: Audit and Integrity Strategy](docs/adr/ADR-004-audit-integrity.md)
