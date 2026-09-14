@@ -24,6 +24,19 @@ Network/live-VM activity: none
 > no-follow regular-file key loading plus strict lab runtime-directory checks.
 > The original findings below remain unchanged as point-in-time audit evidence.
 
+> Phase 10B-3 resolution: The high-value S-010 boundary gaps for ordinary
+> concurrent audit writers and terminal `SESSION_CLOSED`/`SESSION_FAILED`
+> persistence failures are now covered by behavioral tests. Two repository
+> instances writing to one audit database preserve a contiguous,
+> integrity-verifiable chain with the existing `BEGIN IMMEDIATE` transaction
+> and SQLite busy timeout; no retry or timeout behavior changed. Terminal
+> audit failures preserve the already-reached CLOSED or FAILED state, occur
+> after cleanup is attempted, propagate the audit exception, and cause no
+> fallback terminal append. The narrow S-011 `validate` inconsistency is also
+> resolved: configuration/startup failures return exit code 1 with a
+> secret-free stderr message and no traceback. Test-tree reorganization and
+> protected operator diagnostics remain deferred.
+
 # Executive Summary
 
 The core functional MVP is complete and its supported access path is credible. The implementation authenticates a local PAM user, binds authorization to the authenticated principal, evaluates policy fail-closed, resolves an encrypted target credential only after authorization and configuration checks, verifies the pinned SSH host key before password authentication, brokers an interactive PTY under a monotonic duration limit, restores terminal state, and appends HMAC-chained audit events. The supplied record of successful and negative live validation is consistent with the code and automated tests.

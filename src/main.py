@@ -80,18 +80,22 @@ def main(arguments: Sequence[str] | None = None) -> int:
 
 
 def _run_validation(parsed: argparse.Namespace) -> int:
-    settings = RuntimeSettings(
-        auth_db_path=parsed.auth_db,
-        config_db_path=parsed.config_db,
-        vault_db_path=parsed.vault_db,
-        audit_db_path=parsed.audit_db,
-        vault_key_path=parsed.vault_key,
-        audit_integrity_key_path=parsed.audit_key,
-        max_session_duration=timedelta(
-            seconds=parsed.max_session_seconds
-        ),
-    )
-    build_application(settings)
+    try:
+        settings = RuntimeSettings(
+            auth_db_path=parsed.auth_db,
+            config_db_path=parsed.config_db,
+            vault_db_path=parsed.vault_db,
+            audit_db_path=parsed.audit_db,
+            vault_key_path=parsed.vault_key,
+            audit_integrity_key_path=parsed.audit_key,
+            max_session_duration=timedelta(
+                seconds=parsed.max_session_seconds
+            ),
+        )
+        build_application(settings)
+    except (Exception, KeyboardInterrupt):
+        print("Runtime validation failed.", file=sys.stderr)
+        return EXIT_INTERNAL_FAILURE
     return EXIT_SUCCESS
 
 

@@ -656,8 +656,10 @@ class FailingAuditRepository(FakeAuditRepository):
     def __init__(self, fail_on: AuditEventType) -> None:
         super().__init__()
         self.fail_on = fail_on
+        self.attempted_event_types: list[AuditEventType] = []
 
     def append(self, event: AuditEvent) -> None:
+        self.attempted_event_types.append(event.event_type)
         if event.event_type is self.fail_on:
             raise ControlledAuditFailure("controlled audit failure")
         super().append(event)
@@ -683,6 +685,102 @@ def capture_failed_sessions(
         mark_failed,
     )
     return failed_sessions
+
+
+def capture_closed_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[Session]:
+    closed_sessions: list[Session] = []
+    original_mark_closed = Session.mark_closed
+
+    def mark_closed(
+        session: Session,
+        ended_at: datetime,
+        reason: str,
+    ) -> None:
+        original_mark_closed(session, ended_at, reason)
+        closed_sessions.append(session)
+
+    monkeypatch.setattr(
+        access_service_module.Session,
+        "mark_closed",
+        mark_closed,
+    )
+    return closed_sessions
+
+
+def test_closed_audit_failure_preserves_closed_state_and_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    closed_sessions = capture_closed_sessions(monkeypatch)
+    repository = FailingAuditRepository(AuditEventType.SESSION_CLOSED)
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        audit_repository=repository,
+    )
+
+    with pytest.raises(ControlledAuditFailure) as raised:
+        harness.service.handle(
+            PRINCIPAL, make_request(), harness.terminal_io
+        )
+
+    assert str(raised.value) == "controlled audit failure"
+    assert INTERNAL_CREDENTIAL_BYTES.decode() not in str(raised.value)
+    assert len(closed_sessions) == 1
+    session = closed_sessions[0]
+    assert session.status is SessionStatus.CLOSED
+    assert session.close_reason == "relay_completed"
+    assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.close_calls == 1
+    assert harness.vault.calls == [make_account().credential_ref]
+    assert repository.attempted_event_types == [
+        AuditEventType.ACCESS_ALLOWED,
+        AuditEventType.SESSION_OPENING,
+        AuditEventType.SESSION_ACTIVE,
+        AuditEventType.SESSION_CLOSED,
+    ]
+    assert all(
+        event.event_type is not AuditEventType.SESSION_FAILED
+        for event in repository.events
+    )
+
+
+def test_failed_audit_failure_preserves_failed_state_and_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    failed_sessions = capture_failed_sessions(monkeypatch)
+    repository = FailingAuditRepository(AuditEventType.SESSION_FAILED)
+    harness = make_harness(
+        [make_policy(AccessEffect.ALLOW)],
+        relay_error=RuntimeError("controlled relay failure"),
+        close_error=RuntimeError("controlled cleanup failure"),
+        audit_repository=repository,
+    )
+
+    with pytest.raises(ControlledAuditFailure) as raised:
+        harness.service.handle(
+            PRINCIPAL, make_request(), harness.terminal_io
+        )
+
+    assert str(raised.value) == "controlled audit failure"
+    assert INTERNAL_CREDENTIAL_BYTES.decode() not in str(raised.value)
+    assert len(failed_sessions) == 1
+    session = failed_sessions[0]
+    assert session.status is SessionStatus.FAILED
+    assert session.close_reason == "relay_failed"
+    assert harness.brokered_session.relay_calls == [harness.terminal_io]
+    assert harness.brokered_session.close_calls == 1
+    assert harness.vault.calls == [make_account().credential_ref]
+    assert repository.attempted_event_types == [
+        AuditEventType.ACCESS_ALLOWED,
+        AuditEventType.SESSION_OPENING,
+        AuditEventType.SESSION_ACTIVE,
+        AuditEventType.SESSION_FAILED,
+    ]
+    assert all(
+        event.event_type is not AuditEventType.SESSION_CLOSED
+        for event in repository.events
+    )
 
 
 def test_opening_audit_failure_marks_session_failed_before_propagating(

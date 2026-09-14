@@ -1,4 +1,5 @@
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 import hashlib
@@ -7,6 +8,7 @@ import inspect
 from pathlib import Path
 import secrets
 import sqlite3
+from threading import Barrier
 
 import pytest
 
@@ -35,6 +37,22 @@ class StaticKeyProvider:
 
     def get_key(self) -> bytes:
         return self.key
+
+
+class SynchronizingKeyProvider(StaticKeyProvider):
+    def __init__(self, key: bytes) -> None:
+        super().__init__(key)
+        self._barrier: Barrier | None = None
+
+    def synchronize_next_load(self, barrier: Barrier) -> None:
+        self._barrier = barrier
+
+    def get_key(self) -> bytes:
+        barrier = self._barrier
+        if barrier is not None:
+            self._barrier = None
+            barrier.wait(timeout=5)
+        return super().get_key()
 
 
 def make_repository(
@@ -191,6 +209,74 @@ def test_multiple_events_form_contiguous_valid_chain(tmp_path: Path):
     assert rows[1][1] == rows[0][2]
     assert rows[2][1] == rows[1][2]
     assert all(len(row[1]) == 32 and len(row[2]) == 32 for row in rows)
+
+
+def test_concurrent_repository_instances_serialize_audit_chain(
+    tmp_path: Path,
+):
+    database_path = tmp_path / "audit.db"
+    key = secrets.token_bytes(32)
+    providers = (
+        SynchronizingKeyProvider(key),
+        SynchronizingKeyProvider(key),
+    )
+    repositories = tuple(
+        SQLiteAuditRepository(database_path, provider)
+        for provider in providers
+    )
+    start = Barrier(len(repositories))
+    for provider in providers:
+        provider.synchronize_next_load(start)
+
+    events_per_writer = 20
+
+    def append_for_writer(writer: int) -> list[str]:
+        event_ids = []
+        for number in range(events_per_writer):
+            event_id = f"writer-{writer}-event-{number:03d}"
+            repositories[writer].append(
+                make_event(
+                    id=event_id,
+                    timestamp=datetime(
+                        2026,
+                        9,
+                        12,
+                        10,
+                        30,
+                        tzinfo=UTC,
+                    )
+                    + timedelta(
+                        microseconds=(writer * events_per_writer) + number
+                    ),
+                )
+            )
+            event_ids.append(event_id)
+        return event_ids
+
+    with ThreadPoolExecutor(max_workers=len(repositories)) as executor:
+        futures = [
+            executor.submit(append_for_writer, writer)
+            for writer in range(len(repositories))
+        ]
+        successful_event_ids = {
+            event_id
+            for future in futures
+            for event_id in future.result()
+        }
+
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute(
+            "SELECT sequence_no, id FROM audit_events ORDER BY sequence_no"
+        ).fetchall()
+
+    expected_count = len(repositories) * events_per_writer
+    sequence_numbers = [row[0] for row in rows]
+    stored_event_ids = {row[1] for row in rows}
+    assert len(rows) == expected_count
+    assert sequence_numbers == list(range(1, expected_count + 1))
+    assert len(set(sequence_numbers)) == expected_count
+    assert stored_event_ids == successful_event_ids
+    repositories[0].verify_integrity()
 
 
 def test_duplicate_append_rolls_back_without_consuming_sequence(
